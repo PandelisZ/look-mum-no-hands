@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "type": "command",
+        "command": ".cursor/hooks/audit-event.sh beforeShellExecution",
+        "timeout": 5,
+        "failClosed": false
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "type": "command",
+        "command": ".cursor/hooks/audit-event.sh afterShellExecution",
+        "timeout": 5,
+        "failClosed": false
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "type": "command",
+        "command": ".cursor/hooks/audit-event.sh afterFileEdit",
+        "timeout": 5,
+        "failClosed": false
+      }
+    ]
+  }
+}

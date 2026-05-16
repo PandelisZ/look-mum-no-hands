@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "look-mum-no-hands": {
+      "command": "bash",
+      "args": [
+        "./scripts/run-lmnh-mcp.sh"
+      ],
+      "env": {
+        "LMNH_LOG_LEVEL": "info"
+      }
+    }
+  }
+}

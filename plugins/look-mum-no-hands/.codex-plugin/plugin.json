@@ -1,0 +1,46 @@
+{
+  "name": "look-mum-no-hands",
+  "version": "0.1.0",
+  "description": "Expose the Look Mum No Hands macOS automation MCP server to Codex with an agent skill for safe desktop inspection and control.",
+  "author": {
+    "name": "Pandelis Z",
+    "email": "support@example.com",
+    "url": "https://github.com/PandelisZ"
+  },
+  "homepage": "https://github.com/PandelisZ/look-mum-no-hands",
+  "repository": "https://github.com/PandelisZ/look-mum-no-hands",
+  "license": "MIT",
+  "keywords": [
+    "macos",
+    "desktop-automation",
+    "accessibility",
+    "mcp",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Look Mum No Hands",
+    "shortDescription": "Use local macOS accessibility automation through MCP.",
+    "longDescription": "Look Mum No Hands packages a Swift MCP server for macOS UI inspection, virtual cursor targeting, accessibility actions, focusless clicks, and text entry. The bundled skill gives agents a compact workflow for checking permissions, taking UI snapshots, finding elements, and acting without moving the real mouse when possible.",
+    "developerName": "Pandelis Z",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/PandelisZ/look-mum-no-hands",
+    "privacyPolicyURL": "https://github.com/PandelisZ/look-mum-no-hands",
+    "termsOfServiceURL": "https://github.com/PandelisZ/look-mum-no-hands",
+    "defaultPrompt": [
+      "Use Look Mum No Hands to inspect my desktop.",
+      "Find and click a visible macOS UI element.",
+      "Check macOS automation permissions."
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/look-mum-no-hands.svg",
+    "logo": "./assets/look-mum-no-hands.svg",
+    "screenshots": []
+  }
+}

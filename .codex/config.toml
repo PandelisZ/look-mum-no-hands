@@ -1,0 +1,8 @@
+[mcp_servers.look-mum-no-hands-dev]
+command = "/Users/pz/w/look-mum-no-hands/.build/debug/lmnh-mcp"
+args = []
+cwd = "/Users/pz/w/look-mum-no-hands"
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+enabled = true
+required = false
