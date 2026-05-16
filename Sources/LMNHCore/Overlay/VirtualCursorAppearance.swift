@@ -8,6 +8,9 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
     case limePixel = "lime_pixel"
     case goldenGlove = "golden_glove"
     case rocket = "rocket"
+    case realWorldBlueSilver = "real_world_blue_silver"
+    case realWorldAppStarting = "real_world_app_starting"
+    case realWorldBusy = "real_world_busy"
 
     public var id: String { rawValue }
 
@@ -20,6 +23,27 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
         case .limePixel: "Lime Pixel"
         case .goldenGlove: "Golden Glove"
         case .rocket: "Rocket"
+        case .realWorldBlueSilver: "RW Blue-Silver"
+        case .realWorldAppStarting: "RW App Starting"
+        case .realWorldBusy: "RW Busy"
+        }
+    }
+
+    public var usesTint: Bool {
+        switch self {
+        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
+            false
+        case .pinkArrow, .classicMac, .windows2000, .aquaBubble, .limePixel, .goldenGlove, .rocket:
+            true
+        }
+    }
+
+    public var sourceAttribution: String? {
+        switch self {
+        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
+            "RealWorld 3D Blue-Silver Cursors by Vlasta, CC BY, rw-designer.com"
+        case .pinkArrow, .classicMac, .windows2000, .aquaBubble, .limePixel, .goldenGlove, .rocket:
+            nil
         }
     }
 
@@ -39,6 +63,8 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
             VirtualCursorAppearance(theme: self, red: 1.0, green: 0.72, blue: 0.16)
         case .rocket:
             VirtualCursorAppearance(theme: self, red: 1.0, green: 0.25, blue: 0.18)
+        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
+            VirtualCursorAppearance(theme: self, red: 0.18, green: 0.54, blue: 1.0)
         }
     }
 }
@@ -80,11 +106,21 @@ public struct VirtualCursorAppearance: Codable, Equatable, Sendable {
 
     public static func load() -> VirtualCursorAppearance {
         LMNHPaths.ensureStateDirectories()
-        guard let data = try? Data(contentsOf: LMNHPaths.cursorAppearanceFile),
-              let appearance = try? JSONDecoder().decode(VirtualCursorAppearance.self, from: data) else {
-            return .defaultPink
+
+        if let appearance = decode(from: LMNHPaths.cursorAppearanceFile) {
+            return appearance.normalized
         }
-        return appearance.normalized
+
+        if let legacyAppearance = decode(from: LMNHPaths.legacyCursorAppearanceFile) {
+            try? legacyAppearance.normalized.save()
+            return legacyAppearance.normalized
+        }
+
+        let defaultAppearance = VirtualCursorAppearance.defaultPink
+        if !FileManager.default.fileExists(atPath: LMNHPaths.cursorAppearanceFile.path) {
+            try? defaultAppearance.save()
+        }
+        return defaultAppearance
     }
 
     public func save() throws {
@@ -133,6 +169,13 @@ public struct VirtualCursorAppearance: Codable, Equatable, Sendable {
             showLabels: try container.decodeIfPresent(Bool.self, forKey: .showLabels) ?? true,
             showPath: try container.decodeIfPresent(Bool.self, forKey: .showPath) ?? true
         )
+    }
+
+    private static func decode(from url: URL) -> VirtualCursorAppearance? {
+        guard let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(VirtualCursorAppearance.self, from: data)
     }
 }
 

@@ -1,8 +1,10 @@
-[mcp_servers.look-mum-no-hands-dev]
-command = "/Users/pz/w/look-mum-no-hands/.build/debug/lmnh-mcp"
-args = []
-cwd = "/Users/pz/w/look-mum-no-hands"
+[mcp_servers.look-mum-no-hands]
+command = "bash"
+args = ["/Users/pz/w/look-mum-no-hands/plugins/look-mum-no-hands/scripts/run-lmnh-mcp.sh"]
 startup_timeout_sec = 20
 tool_timeout_sec = 120
 enabled = true
 required = false
+
+[mcp_servers.look-mum-no-hands.env]
+LMNH_REPO_ROOT = "/Users/pz/w/look-mum-no-hands"

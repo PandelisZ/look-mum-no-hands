@@ -15,19 +15,26 @@ public enum LMNHPaths {
     }
 
     public static var stateDirectory: URL {
-        projectRoot.appending(path: ".lmnh-agent", directoryHint: .isDirectory)
+        FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: ".look-mum-no-hands", directoryHint: .isDirectory)
     }
 
     public static var logsDirectory: URL {
-        stateDirectory.appending(path: "logs", directoryHint: .isDirectory)
+        stateDirectory
     }
 
     public static var cursorAppearanceFile: URL {
         stateDirectory.appending(path: "cursor-appearance.json")
     }
 
+    public static var legacyCursorAppearanceFile: URL {
+        projectRoot
+            .appending(path: ".lmnh-agent", directoryHint: .isDirectory)
+            .appending(path: "cursor-appearance.json")
+    }
+
     public static var mcpLogFile: URL {
-        logsDirectory.appending(path: "mcp.jsonl")
+        stateDirectory.appending(path: "server.logs")
     }
 
     public static func ensureStateDirectories() {

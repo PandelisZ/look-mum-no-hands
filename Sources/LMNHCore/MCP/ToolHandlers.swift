@@ -130,6 +130,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             windowInventory: windowInventory,
             axClient: axClient
         )
+        _ = VirtualCursorAppearance.load()
         self.cursorController = VirtualCursorController(mode: virtualCursorRenderMode)
         self.actionExecutor = ActionExecutor(elementRegistry: elementRegistry, axClient: axClient)
     }

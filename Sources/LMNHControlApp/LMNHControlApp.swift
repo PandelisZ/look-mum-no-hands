@@ -33,7 +33,7 @@ struct LMNHControlApp: App {
 private final class ControlPanelModel: ObservableObject {
     @Published var permissionStatus: MacOSPermissionStatus = PermissionStatusReader().current()
     @Published var appearance: VirtualCursorAppearance = .load()
-    @Published var logLines: [String] = []
+    @Published var logEntries: [LogEntry] = []
     @Published var saveMessage: String = ""
     @Published var installMessage: String = ""
     @Published var isMCPServerRunning: Bool = false
@@ -62,7 +62,7 @@ private final class ControlPanelModel: ObservableObject {
     func refresh() {
         permissionStatus = permissionReader.current()
         appearance = VirtualCursorAppearance.load()
-        logLines = readTail(of: LMNHPaths.mcpLogFile, maxLines: 80)
+        logEntries = readTail(of: LMNHPaths.mcpLogFile, maxLines: 160)
         if let mcpProcess, !mcpProcess.isRunning {
             self.mcpProcess = nil
             isMCPServerRunning = false
@@ -83,6 +83,17 @@ private final class ControlPanelModel: ObservableObject {
     func resetAppearance() {
         appearance = .defaultPink
         saveAppearance()
+    }
+
+    func applyTheme(_ theme: VirtualCursorTheme) {
+        let previous = appearance.normalized
+        var next = theme.defaultAppearance
+        next.alpha = previous.alpha
+        next.scale = previous.scale
+        next.animationDuration = previous.animationDuration
+        next.showLabels = previous.showLabels
+        next.showPath = previous.showPath
+        appearance = next
     }
 
     func openAccessibilitySettings() {
@@ -150,8 +161,7 @@ private final class ControlPanelModel: ObservableObject {
                         "command": Self.mcpBinaryURL.path,
                         "args": [],
                         "env": [
-                            "LMNH_LOG_LEVEL": "debug",
-                            "LMNH_PROJECT_ROOT": LMNHPaths.projectRoot.path
+                            "LMNH_LOG_LEVEL": "debug"
                         ]
                     ]
                 ]
@@ -188,24 +198,43 @@ private final class ControlPanelModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([LMNHPaths.projectRoot])
     }
 
-    private func readTail(of url: URL, maxLines: Int) -> [String] {
+    private func readTail(of url: URL, maxLines: Int) -> [LogEntry] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return ["No MCP command log yet. Calls will appear in \(url.path)."]
+            return [
+                LogEntry(
+                    timestamp: "--",
+                    status: "info",
+                    tool: "lmnh",
+                    summary: "No MCP command log yet. Calls will appear in \(url.path)."
+                )
+            ]
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(maxLines)
         return lines.map(formatLogLine)
     }
 
-    private func formatLogLine(_ line: Substring) -> String {
+    private func formatLogLine(_ line: Substring) -> LogEntry {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return String(line)
+            return LogEntry(timestamp: "--", status: "raw", tool: "log", summary: String(line))
         }
         let timestamp = object["timestamp"] as? String ?? "unknown-time"
         let tool = object["tool_name"] as? String ?? "unknown-tool"
         let summary = object["summary"] as? String ?? ""
-        let isError = (object["is_error"] as? Bool) == true ? "ERROR" : "ok"
-        return "[\(timestamp)] \(isError) \(tool) - \(summary)"
+        let isError = (object["is_error"] as? Bool) == true
+        return LogEntry(
+            timestamp: Self.shortTimestamp(timestamp),
+            status: isError ? "error" : "ok",
+            tool: tool,
+            summary: summary
+        )
+    }
+
+    private static func shortTimestamp(_ timestamp: String) -> String {
+        guard let time = timestamp.split(separator: "T").last else {
+            return timestamp
+        }
+        return String(time.replacingOccurrences(of: "Z", with: ""))
     }
 
     private static var mcpBinaryURL: URL {
@@ -258,11 +287,19 @@ private struct ControlPanelView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
-                Text("MCP Debug Log")
-                    .font(.title2.weight(.semibold))
-                Text("Recent MCP tool calls from \(LMNHPaths.mcpLogFile.path)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("MCP Debug Log")
+                            .font(.title2.weight(.semibold))
+                        Text("Polling \(LMNHPaths.mcpLogFile.path)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("\(model.logEntries.count) lines")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 logView
             }
             .padding(24)
@@ -289,6 +326,9 @@ private struct ControlPanelView: View {
                 Button("Screen Recording") { model.openScreenRecordingSettings() }
             }
             .buttonStyle(.bordered)
+            Text("Settings \(LMNHPaths.stateDirectory.path)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Text("Process \(model.permissionStatus.processIdentifier)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -349,7 +389,7 @@ private struct ControlPanelView: View {
                 .frame(height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
-            Picker("Mouse", selection: $model.appearance.theme) {
+            Picker("Mouse", selection: themeBinding) {
                 ForEach(VirtualCursorTheme.allCases) { theme in
                     Text(theme.displayName).tag(theme)
                 }
@@ -359,15 +399,22 @@ private struct ControlPanelView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
                 ForEach(VirtualCursorTheme.allCases) { theme in
                     Button(theme.displayName) {
-                        model.appearance = theme.defaultAppearance
+                        model.applyTheme(theme)
                     }
                     .buttonStyle(.bordered)
                 }
             }
 
-            SliderRow(title: "Red", value: $model.appearance.red, range: 0...1)
-            SliderRow(title: "Green", value: $model.appearance.green, range: 0...1)
-            SliderRow(title: "Blue", value: $model.appearance.blue, range: 0...1)
+            if model.appearance.normalized.theme.usesTint {
+                SliderRow(title: "Red", value: $model.appearance.red, range: 0...1)
+                SliderRow(title: "Green", value: $model.appearance.green, range: 0...1)
+                SliderRow(title: "Blue", value: $model.appearance.blue, range: 0...1)
+            } else if let attribution = VirtualCursorArtwork.attribution(for: model.appearance.normalized.theme) {
+                Text(attribution)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             SliderRow(title: "Scale", value: $model.appearance.scale, range: 0.5...2.5)
             SliderRow(title: "Easing Duration", value: $model.appearance.animationDuration, range: 0.05...2.0)
             Toggle("Show labels", isOn: $model.appearance.showLabels)
@@ -390,166 +437,49 @@ private struct ControlPanelView: View {
         .background(RoundedRectangle(cornerRadius: 18).fill(.background.opacity(0.72)))
     }
 
-    private var logView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(model.logLines.enumerated()), id: \.offset) { _, line in
-                    Text(line)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.45)))
-                }
-            }
-        }
-    }
-}
-
-private struct PermissionRow: View {
-    let title: String
-    let state: PermissionState
-
-    var body: some View {
-        HStack {
-            Circle()
-                .fill(state == .granted ? Color.green : Color.red)
-                .frame(width: 10, height: 10)
-            Text(title)
-            Spacer()
-            Text(state.rawValue)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(state == .granted ? .green : .red)
-        }
-    }
-}
-
-private struct SliderRow: View {
-    let title: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(value, format: .number.precision(.fractionLength(2)))
-                    .foregroundStyle(.secondary)
-                    .font(.caption.monospacedDigit())
-            }
-            Slider(value: $value, in: range)
-        }
-    }
-}
-
-private struct CursorPreview: View {
-    let appearance: VirtualCursorAppearance
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                let progress = (sin(t * 2.2) + 1) / 2
-                let eased = 1 - pow(1 - progress, 3)
-                let start = CGPoint(x: 54, y: size.height - 34)
-                let end = CGPoint(x: size.width - 70, y: 34)
-                let point = CGPoint(
-                    x: start.x + (end.x - start.x) * eased,
-                    y: start.y + (end.y - start.y) * eased
-                )
-                let color = Color(
-                    red: appearance.normalized.red,
-                    green: appearance.normalized.green,
-                    blue: appearance.normalized.blue,
-                    opacity: appearance.normalized.alpha
-                )
-
-                var path = Path()
-                path.move(to: start)
-                path.addCurve(
-                    to: end,
-                    control1: CGPoint(x: start.x, y: end.y),
-                    control2: CGPoint(x: end.x, y: start.y)
-                )
-                context.stroke(path, with: .color(color.opacity(0.28)), style: StrokeStyle(lineWidth: 3, dash: [6, 7]))
-                context.stroke(Path(ellipseIn: CGRect(center: end, radius: 12)), with: .color(color.opacity(0.7)), lineWidth: 2)
-                context.fill(Path(ellipseIn: CGRect(center: start, radius: 5)), with: .color(color.opacity(0.4)))
-                context.fill(cursorPath(at: point, scale: appearance.normalized.scale), with: .color(color))
-                context.stroke(cursorPath(at: point, scale: appearance.normalized.scale), with: .color(.white.opacity(0.92)), lineWidth: 1.5)
-            }
-        }
-        .background(
-            LinearGradient(colors: [.black.opacity(0.84), .purple.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    private var themeBinding: Binding<VirtualCursorTheme> {
+        Binding(
+            get: { model.appearance.theme },
+            set: { model.applyTheme($0) }
         )
     }
 
-    private func cursorPath(at point: CGPoint, scale: Double) -> Path {
-        let s = CGFloat(scale)
-        switch appearance.normalized.theme {
-        case .pinkArrow, .classicMac, .windows2000:
-            return arrowPath(at: point, scale: s)
-        case .aquaBubble:
-            return arrowPath(at: point, scale: s)
-        case .limePixel:
-            return pixelPath(at: point, scale: s)
-        case .goldenGlove:
-            return glovePath(at: point, scale: s)
-        case .rocket:
-            return rocketPath(at: point, scale: s)
+    private var logView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("time").frame(width: 92, alignment: .leading)
+                Text("status").frame(width: 56, alignment: .leading)
+                Text("tool").frame(width: 190, alignment: .leading)
+                Text("message").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption2.monospaced().weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.22))
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.logEntries) { entry in
+                            LogRow(entry: entry)
+                                .id(entry.id)
+                        }
+                    }
+                }
+                .background(.black.opacity(0.16))
+                .onChange(of: model.logEntries) { _, entries in
+                    guard let last = entries.last else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
         }
-    }
-
-    private func arrowPath(at point: CGPoint, scale s: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: point)
-        path.addLine(to: CGPoint(x: point.x + 10 * s, y: point.y + 34 * s))
-        path.addLine(to: CGPoint(x: point.x + 28 * s, y: point.y + 18 * s))
-        path.closeSubpath()
-        return path
-    }
-
-    private func pixelPath(at point: CGPoint, scale s: CGFloat) -> Path {
-        let unit = 5 * s
-        var path = Path()
-        path.move(to: point)
-        path.addLine(to: CGPoint(x: point.x, y: point.y + 7 * unit))
-        path.addLine(to: CGPoint(x: point.x + unit, y: point.y + 7 * unit))
-        path.addLine(to: CGPoint(x: point.x + unit, y: point.y + 5 * unit))
-        path.addLine(to: CGPoint(x: point.x + 2 * unit, y: point.y + 5 * unit))
-        path.addLine(to: CGPoint(x: point.x + 2 * unit, y: point.y + 6 * unit))
-        path.addLine(to: CGPoint(x: point.x + 3 * unit, y: point.y + 6 * unit))
-        path.addLine(to: CGPoint(x: point.x + 3 * unit, y: point.y + 4 * unit))
-        path.addLine(to: CGPoint(x: point.x + 5 * unit, y: point.y + 4 * unit))
-        path.closeSubpath()
-        return path
-    }
-
-    private func glovePath(at point: CGPoint, scale s: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: point)
-        path.addCurve(to: CGPoint(x: point.x + 8 * s, y: point.y + 28 * s), control1: CGPoint(x: point.x + 2 * s, y: point.y + 9 * s), control2: CGPoint(x: point.x + 4 * s, y: point.y + 19 * s))
-        path.addCurve(to: CGPoint(x: point.x + 18 * s, y: point.y + 21 * s), control1: CGPoint(x: point.x + 12 * s, y: point.y + 30 * s), control2: CGPoint(x: point.x + 18 * s, y: point.y + 28 * s))
-        path.addCurve(to: CGPoint(x: point.x + 30 * s, y: point.y + 10 * s), control1: CGPoint(x: point.x + 24 * s, y: point.y + 21 * s), control2: CGPoint(x: point.x + 30 * s, y: point.y + 17 * s))
-        path.addCurve(to: CGPoint(x: point.x + 14 * s, y: point.y + 2 * s), control1: CGPoint(x: point.x + 29 * s, y: point.y + 1 * s), control2: CGPoint(x: point.x + 20 * s, y: point.y - 2 * s))
-        path.closeSubpath()
-        return path
-    }
-
-    private func rocketPath(at point: CGPoint, scale s: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: point)
-        path.addLine(to: CGPoint(x: point.x + 13 * s, y: point.y + 38 * s))
-        path.addLine(to: CGPoint(x: point.x + 22 * s, y: point.y + 22 * s))
-        path.addLine(to: CGPoint(x: point.x + 34 * s, y: point.y + 18 * s))
-        path.addLine(to: CGPoint(x: point.x + 22 * s, y: point.y + 12 * s))
-        path.addLine(to: CGPoint(x: point.x + 17 * s, y: point.y + 2 * s))
-        path.closeSubpath()
-        return path
-    }
-}
-
-private extension CGRect {
-    init(center: CGPoint, radius: CGFloat) {
-        self.init(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        )
     }
 }

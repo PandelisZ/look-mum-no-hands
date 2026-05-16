@@ -387,137 +387,14 @@ private final class VirtualCursorCanvasView: NSView {
     }
 
     private func drawCursorArrow(at point: CGPoint, color: NSColor) {
-        let scale = appearanceScale
-        let theme = cursorAppearance.normalized.theme
-        let path = cursorPath(for: theme, at: point, scale: scale)
-
-        switch theme {
-        case .classicMac:
-            NSColor.white.setFill()
-            path.fill()
-            NSColor.black.setStroke()
-            path.lineWidth = 2 * scale
-            path.stroke()
-        case .windows2000:
-            NSColor.white.setFill()
-            path.fill()
-            NSColor.black.setStroke()
-            path.lineWidth = 1.4 * scale
-            path.stroke()
-            color.withAlphaComponent(0.85).setStroke()
-            let shadow = cursorPath(for: theme, at: point.offsetBy(dx: 2 * scale, dy: -2 * scale), scale: scale)
-            shadow.lineWidth = 1 * scale
-            shadow.stroke()
-        case .aquaBubble:
-            color.withAlphaComponent(0.28).setFill()
-            NSBezierPath(ovalIn: CGRect(center: point.offsetBy(dx: 13 * scale, dy: -13 * scale), radius: 18 * scale)).fill()
-            NSColor.white.withAlphaComponent(0.88).setStroke()
-            path.lineWidth = 4 * scale
-            path.stroke()
-            color.withAlphaComponent(0.94).setFill()
-            path.fill()
-        case .limePixel:
-            NSColor.black.withAlphaComponent(0.9).setStroke()
-            path.lineWidth = 3 * scale
-            path.stroke()
-            color.withAlphaComponent(0.98).setFill()
-            path.fill()
-        case .goldenGlove:
-            NSColor.black.withAlphaComponent(0.35).setStroke()
-            path.lineWidth = 3 * scale
-            path.stroke()
-            color.withAlphaComponent(0.96).setFill()
-            path.fill()
-        case .rocket:
-            NSColor.white.withAlphaComponent(0.9).setStroke()
-            path.lineWidth = 3 * scale
-            path.stroke()
-            color.withAlphaComponent(0.95).setFill()
-            path.fill()
-            NSColor.systemOrange.withAlphaComponent(0.95).setFill()
-            NSBezierPath(ovalIn: CGRect(center: point.offsetBy(dx: 17 * scale, dy: -27 * scale), radius: 5 * scale)).fill()
-        case .pinkArrow:
-            NSColor.white.withAlphaComponent(0.92).setStroke()
-            path.lineWidth = 4 * scale
-            path.stroke()
-            color.withAlphaComponent(cursorAppearance.normalized.alpha).setFill()
-            path.fill()
-            color.withAlphaComponent(0.95).setStroke()
-            path.lineWidth = 1.5 * scale
-            path.stroke()
-        }
-    }
-
-    private func cursorPath(for theme: VirtualCursorTheme, at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        switch theme {
-        case .classicMac, .pinkArrow, .windows2000:
-            arrowPath(at: point, scale: scale)
-        case .aquaBubble:
-            roundedArrowPath(at: point, scale: scale)
-        case .limePixel:
-            pixelCursorPath(at: point, scale: scale)
-        case .goldenGlove:
-            gloveCursorPath(at: point, scale: scale)
-        case .rocket:
-            rocketCursorPath(at: point, scale: scale)
-        }
-    }
-
-    private func arrowPath(at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: point)
-        path.line(to: CGPoint(x: point.x + 10 * scale, y: point.y - 34 * scale))
-        path.line(to: CGPoint(x: point.x + 28 * scale, y: point.y - 18 * scale))
-        path.close()
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        return path
-    }
-
-    private func roundedArrowPath(at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        let path = arrowPath(at: point, scale: scale)
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        return path
-    }
-
-    private func pixelCursorPath(at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        let unit = 5 * scale
-        let path = NSBezierPath()
-        path.move(to: point)
-        path.line(to: CGPoint(x: point.x, y: point.y - 7 * unit))
-        path.line(to: CGPoint(x: point.x + unit, y: point.y - 7 * unit))
-        path.line(to: CGPoint(x: point.x + unit, y: point.y - 5 * unit))
-        path.line(to: CGPoint(x: point.x + 2 * unit, y: point.y - 5 * unit))
-        path.line(to: CGPoint(x: point.x + 2 * unit, y: point.y - 6 * unit))
-        path.line(to: CGPoint(x: point.x + 3 * unit, y: point.y - 6 * unit))
-        path.line(to: CGPoint(x: point.x + 3 * unit, y: point.y - 4 * unit))
-        path.line(to: CGPoint(x: point.x + 5 * unit, y: point.y - 4 * unit))
-        path.close()
-        return path
-    }
-
-    private func gloveCursorPath(at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: point)
-        path.curve(to: CGPoint(x: point.x + 8 * scale, y: point.y - 28 * scale), controlPoint1: CGPoint(x: point.x + 2 * scale, y: point.y - 9 * scale), controlPoint2: CGPoint(x: point.x + 4 * scale, y: point.y - 19 * scale))
-        path.curve(to: CGPoint(x: point.x + 18 * scale, y: point.y - 21 * scale), controlPoint1: CGPoint(x: point.x + 12 * scale, y: point.y - 30 * scale), controlPoint2: CGPoint(x: point.x + 18 * scale, y: point.y - 28 * scale))
-        path.curve(to: CGPoint(x: point.x + 30 * scale, y: point.y - 10 * scale), controlPoint1: CGPoint(x: point.x + 24 * scale, y: point.y - 21 * scale), controlPoint2: CGPoint(x: point.x + 30 * scale, y: point.y - 17 * scale))
-        path.curve(to: CGPoint(x: point.x + 14 * scale, y: point.y - 2 * scale), controlPoint1: CGPoint(x: point.x + 29 * scale, y: point.y - 1 * scale), controlPoint2: CGPoint(x: point.x + 20 * scale, y: point.y + 2 * scale))
-        path.close()
-        return path
-    }
-
-    private func rocketCursorPath(at point: CGPoint, scale: CGFloat) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: point)
-        path.line(to: CGPoint(x: point.x + 13 * scale, y: point.y - 38 * scale))
-        path.line(to: CGPoint(x: point.x + 22 * scale, y: point.y - 22 * scale))
-        path.line(to: CGPoint(x: point.x + 34 * scale, y: point.y - 18 * scale))
-        path.line(to: CGPoint(x: point.x + 22 * scale, y: point.y - 12 * scale))
-        path.line(to: CGPoint(x: point.x + 17 * scale, y: point.y - 2 * scale))
-        path.close()
-        return path
+        let appearance = cursorAppearance.normalized
+        VirtualCursorThemePainter.drawCursor(
+            theme: appearance.theme,
+            at: point,
+            scale: appearanceScale,
+            tint: color,
+            alpha: CGFloat(appearance.alpha)
+        )
     }
 
     private func drawBlocked(at point: CGPoint) {

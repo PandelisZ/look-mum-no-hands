@@ -15,7 +15,10 @@ let package = Package(
     targets: [
         .target(
             name: "LMNHCore",
-            path: "Sources/LMNHCore"
+            path: "Sources/LMNHCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .executableTarget(
             name: "LMNHMCP",

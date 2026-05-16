@@ -73,6 +73,21 @@ final class VirtualCursorControllerTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testBitmapCursorThemesLoadBundledFrames() {
+        let themes: [VirtualCursorTheme] = [
+            .realWorldBlueSilver,
+            .realWorldAppStarting,
+            .realWorldBusy
+        ]
+
+        for theme in themes {
+            let frame = VirtualCursorArtwork.bitmapFrame(for: theme, at: Date(timeIntervalSinceReferenceDate: 0))
+
+            XCTAssertNotNil(frame, "\(theme.displayName) should load a bundled bitmap cursor frame")
+        }
+    }
+
     func testAppearanceDecodesLegacyConfigWithoutTheme() throws {
         let data = Data("""
         {"red":1.0,"green":0.18,"blue":0.62,"alpha":1.0,"scale":1.0,"animationDuration":0.42,"showLabels":true,"showPath":true}
