@@ -168,19 +168,22 @@ private final class VirtualCursorCanvasView: NSView {
     }
 
     private func updateAnimatedCursors() {
+        let now = Date()
         let incoming = Dictionary(uniqueKeysWithValues: cursors.map { ($0.cursorID, $0) })
         animatedCursors = animatedCursors.filter { incoming[$0.key] != nil }
 
         for cursor in cursors {
             let endPoint = cursor.target.displayPoint?.cgPoint
             let previous = animatedCursors[cursor.cursorID]
-            let currentPoint = previous?.presentationPoint(at: Date()) ?? previous?.endPoint ?? endPoint
+            let currentPoint = previous?.presentationPoint(at: now) ?? previous?.endPoint ?? endPoint
+            let clickPulseStartedAt = clickPulseStart(for: cursor, previous: previous, now: now)
             animatedCursors[cursor.cursorID] = AnimatedVirtualCursor(
                 cursor: cursor,
                 startPoint: currentPoint,
                 endPoint: endPoint,
-                startedAt: Date(),
-                duration: cursorAppearance.normalized.animationDuration
+                startedAt: now,
+                duration: cursorAppearance.normalized.animationDuration,
+                clickPulseStartedAt: clickPulseStartedAt
             )
         }
     }
@@ -217,15 +220,25 @@ private final class VirtualCursorCanvasView: NSView {
         }
 
         let localPoint = localPoint(forScreenPoint: point)
-        drawCursorArrow(at: localPoint, color: color, rotation: motionRotation(for: animatedCursor, at: now))
+        drawCursorArrow(
+            at: localPoint,
+            color: color,
+            rotation: motionRotation(for: animatedCursor, at: now),
+            scaleMultiplier: VirtualCursorMotion.clickScale(startedAt: animatedCursor.clickPulseStartedAt, at: now)
+        )
     }
 
-    private func drawCursorArrow(at point: CGPoint, color: NSColor, rotation: CGFloat = 0) {
+    private func drawCursorArrow(
+        at point: CGPoint,
+        color: NSColor,
+        rotation: CGFloat = 0,
+        scaleMultiplier: CGFloat = 1
+    ) {
         let appearance = cursorAppearance.normalized
         VirtualCursorThemePainter.drawCursor(
             theme: appearance.theme,
             at: point,
-            scale: appearanceScale,
+            scale: appearanceScale * scaleMultiplier,
             tint: color,
             alpha: CGFloat(appearance.alpha),
             rotation: rotation
@@ -240,6 +253,23 @@ private final class VirtualCursorCanvasView: NSView {
             startedAt: animatedCursor.startedAt,
             duration: animatedCursor.duration
         )
+    }
+
+    private func clickPulseStart(
+        for cursor: VirtualCursorRecord,
+        previous: AnimatedVirtualCursor?,
+        now: Date
+    ) -> Date? {
+        if cursor.state == .pressing, previous?.cursor.state != .pressing {
+            return now
+        }
+
+        guard let startedAt = previous?.clickPulseStartedAt,
+              now.timeIntervalSince(startedAt) < VirtualCursorMotion.clickPulseDuration else {
+            return nil
+        }
+
+        return startedAt
     }
 
     @objc private func cursorAppearanceDidChange(_ notification: Notification) {
@@ -257,22 +287,6 @@ private final class VirtualCursorCanvasView: NSView {
     private func localPoint(forScreenPoint point: CGPoint) -> CGPoint {
         VirtualCursorCoordinateConverter.localPoint(fromGlobalTopLeft: point, inScreenFrame: screen.frame)
     }
-
-    private func localRect(forScreenRect rect: CGRect) -> CGRect {
-        VirtualCursorCoordinateConverter.localRect(fromGlobalTopLeft: rect, inScreenFrame: screen.frame)
-    }
-}
-
-private extension VirtualCursorRecord {
-    var displayLabel: String? {
-        guard let label = taskLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !label.isEmpty,
-              !label.hasPrefix("act_"),
-              !label.hasPrefix("call_") else {
-            return nil
-        }
-        return label
-    }
 }
 
 private struct AnimatedVirtualCursor {
@@ -281,6 +295,7 @@ private struct AnimatedVirtualCursor {
     var endPoint: CGPoint?
     var startedAt: Date
     var duration: Double
+    var clickPulseStartedAt: Date?
 
     func presentationPoint(at date: Date) -> CGPoint? {
         guard let endPoint else {
@@ -310,27 +325,6 @@ private extension NSBezierPath {
     func fill(with color: NSColor) {
         color.setFill()
         fill()
-    }
-}
-
-private extension CGRect {
-    init(center: CGPoint, radius: CGFloat) {
-        self.init(
-            x: center.x - radius,
-            y: center.y - radius,
-            width: radius * 2,
-            height: radius * 2
-        )
-    }
-}
-
-private extension CGPoint {
-    func offsetBy(dx: CGFloat, dy: CGFloat) -> CGPoint {
-        CGPoint(x: x + dx, y: y + dy)
-    }
-
-    func distance(to other: CGPoint) -> CGFloat {
-        hypot(x - other.x, y - other.y)
     }
 }
 
