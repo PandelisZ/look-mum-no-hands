@@ -1,4 +1,5 @@
 .build/
 .lmnh-agent/
+dist/
 research.md
 plan.md
