@@ -36,6 +36,7 @@ run_step() {
   run_step swift test
   run_step swift build
   run_step python3 scripts/mcp_smoke.py
+  run_step python3 scripts/http_mcp_smoke.py
   printf '\nLook Mum No Hands verification finished at %s with status %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$status"
   exit "$status"
 } 2>&1 | tee "$log_file"

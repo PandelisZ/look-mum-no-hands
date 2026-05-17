@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Look Mum No Hands",
     "shortDescription": "Use local macOS accessibility automation through MCP.",
-    "longDescription": "Look Mum No Hands packages a Swift MCP server for macOS UI inspection, virtual cursor targeting, accessibility actions, focusless clicks, and text entry. The bundled skill gives agents a compact workflow for checking permissions, taking UI snapshots, finding elements, and acting without moving the real mouse when possible.",
+    "longDescription": "Look Mum No Hands packages a Swift MCP server for macOS UI inspection, virtual cursor targeting, accessibility actions, focusless clicks, and text entry. Agents should use these MCP tools for UI control instead of osascript, AppleScript, System Events, shell keyboard events, or ad hoc app scripting. The bundled skill gives agents a compact workflow for checking permissions, taking UI snapshots, finding elements, and acting without moving the real mouse when possible.",
     "developerName": "Pandelis Z",
     "category": "Coding",
     "capabilities": [
@@ -34,9 +34,9 @@
     "privacyPolicyURL": "https://github.com/PandelisZ/look-mum-no-hands",
     "termsOfServiceURL": "https://github.com/PandelisZ/look-mum-no-hands",
     "defaultPrompt": [
-      "Use Look Mum No Hands to inspect my desktop.",
-      "Find and click a visible macOS UI element.",
-      "Check macOS automation permissions."
+      "Use Look Mum No Hands MCP tools to inspect my desktop.",
+      "Find and click a visible macOS UI element without using osascript, AppleScript, or System Events.",
+      "Check macOS automation permissions and let the MCP tools operate UI."
     ],
     "brandColor": "#0F766E",
     "composerIcon": "./assets/look-mum-no-hands.svg",

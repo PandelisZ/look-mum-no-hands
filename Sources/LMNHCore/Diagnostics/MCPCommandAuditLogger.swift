@@ -43,6 +43,32 @@ public actor MCPCommandAuditLogger {
             summary: result.content.first?.text
         )
 
+        write(entry)
+    }
+
+    public func logServerEvent(
+        transport: String,
+        method: String,
+        path: String,
+        statusCode: Int,
+        isError: Bool
+    ) {
+        let entry = MCPCommandAuditEntry(
+            toolName: "\(transport)_\(method)",
+            arguments: .object([
+                "transport": .string(transport),
+                "method": .string(method),
+                "path": .string(path),
+                "status_code": .integer(statusCode)
+            ]),
+            isError: isError,
+            summary: "\(transport.uppercased()) MCP \(method) -> \(statusCode)"
+        )
+
+        write(entry)
+    }
+
+    private func write(_ entry: MCPCommandAuditEntry) {
         guard let data = try? encoder.encode(entry) else {
             return
         }

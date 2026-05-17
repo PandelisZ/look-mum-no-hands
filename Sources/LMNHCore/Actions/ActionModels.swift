@@ -26,6 +26,88 @@ public enum ActionResultStatus: String, Codable, Sendable {
     case requiresConfirmation = "requires_confirmation"
 }
 
+public enum TextEntryMutationMode: String, Codable, Sendable {
+    case replace
+    case append
+    case selection
+}
+
+public struct TextEntryDiagnostics: Codable, Sendable {
+    public var method: String
+    public var requestedMode: String
+    public var effectiveMode: String?
+    public var focusless: Bool
+    public var valueAttribute: String
+    public var valueWasSettable: Bool
+    public var selectedRange: String?
+    public var originalLength: Int?
+    public var insertedLength: Int
+    public var resultingLength: Int?
+    public var fallbackPolicy: String
+    public var failureReason: String?
+    public var role: String?
+    public var settableAttributes: [String]
+
+    public init(
+        method: String,
+        requestedMode: String,
+        effectiveMode: String? = nil,
+        focusless: Bool = true,
+        valueAttribute: String = AXNames.Attribute.value,
+        valueWasSettable: Bool = false,
+        selectedRange: String? = nil,
+        originalLength: Int? = nil,
+        insertedLength: Int,
+        resultingLength: Int? = nil,
+        fallbackPolicy: String = "keyboard_and_paste_not_attempted",
+        failureReason: String? = nil,
+        role: String? = nil,
+        settableAttributes: [String] = []
+    ) {
+        self.method = method
+        self.requestedMode = requestedMode
+        self.effectiveMode = effectiveMode
+        self.focusless = focusless
+        self.valueAttribute = valueAttribute
+        self.valueWasSettable = valueWasSettable
+        self.selectedRange = selectedRange
+        self.originalLength = originalLength
+        self.insertedLength = insertedLength
+        self.resultingLength = resultingLength
+        self.fallbackPolicy = fallbackPolicy
+        self.failureReason = failureReason
+        self.role = role
+        self.settableAttributes = settableAttributes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case method
+        case requestedMode = "requested_mode"
+        case effectiveMode = "effective_mode"
+        case focusless
+        case valueAttribute = "value_attribute"
+        case valueWasSettable = "value_was_settable"
+        case selectedRange = "selected_range"
+        case originalLength = "original_length"
+        case insertedLength = "inserted_length"
+        case resultingLength = "resulting_length"
+        case fallbackPolicy = "fallback_policy"
+        case failureReason = "failure_reason"
+        case role
+        case settableAttributes = "settable_attributes"
+    }
+}
+
+public struct TextEntryResult: Codable, Sendable {
+    public var action: MacOSActionResult
+    public var diagnostics: TextEntryDiagnostics
+
+    public init(action: MacOSActionResult, diagnostics: TextEntryDiagnostics) {
+        self.action = action
+        self.diagnostics = diagnostics
+    }
+}
+
 public struct MacOSActionResult: Codable, Sendable {
     public var actionId: String
     public var requested: String

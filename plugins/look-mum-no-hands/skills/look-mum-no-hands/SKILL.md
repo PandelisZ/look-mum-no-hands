@@ -7,6 +7,12 @@ description: Use when the user asks to use Look Mum No Hands, LMNH, or its macOS
 
 Use the `look-mum-no-hands` MCP server for local macOS UI inspection and controlled desktop automation. Prefer semantic accessibility actions and virtual cursor targeting before actions that may move or affect the real desktop.
 
+## Hard rule: do not bypass LMNH
+
+When a task involves opening, inspecting, clicking, pressing, typing into, or otherwise operating macOS app UI, use the LMNH MCP tools. Do **not** use `open`, `osascript`, AppleScript, `System Events`, GUI scripting, shell-driven keyboard events, or ad hoc app scripting to operate UI unless the user explicitly asks for that specific mechanism or LMNH reports that the required capability is unsupported.
+
+If a model is tempted to run `open -a ...` or `osascript -e 'tell application "System Events" ...'`, stop and use `macos_open_app`, `macos_snapshot`, `macos_find_elements`, `macos_perform_action`, `macos_click`, or `macos_type_text` instead.
+
 ## Startup checks
 
 1. If tools are unavailable, confirm the plugin MCP server is installed and enabled.
@@ -28,15 +34,17 @@ Set `LMNH_REPO_ROOT=/path/to/look-mum-no-hands` if the installed plugin cache ca
 
 ## Action workflow
 
-1. Use `macos_set_virtual_cursor` to show the intended target without moving the real mouse.
-2. Prefer `macos_perform_action` with `action: "AXPress"` for known accessibility elements.
-3. Use `macos_click` with `snapshot_id` and `element_id` when semantic press is unavailable; use coordinates only after a fresh snapshot confirms them.
-4. Use `macos_type_text` with `method: "ax_set_value"` for text fields when possible; use `paste` or `keystrokes` only when the app requires it.
-5. Use `macos_hide_virtual_cursor` after a workflow if visual cursors are no longer useful.
+1. Use `macos_open_app` to open apps. Set `background: true` and `restore_focus: true` unless the user explicitly wants the app focused.
+2. Use `macos_set_virtual_cursor` to show the intended target without moving the real mouse.
+3. Prefer `macos_perform_action` with `action: "AXPress"` for known accessibility elements.
+4. Use `macos_click` with `snapshot_id` and `element_id` when semantic press is unavailable; use coordinates only after a fresh snapshot confirms them.
+5. Use `macos_type_text` with focusless AX modes for text fields when possible. Do not use AppleScript, `osascript`, `System Events`, paste, or keystrokes as the first path.
+6. Use `macos_hide_virtual_cursor` after a workflow if visual cursors are no longer useful.
 
 ## Tool map
 
 - `macos_permission_status`: report Accessibility and Screen Recording status.
+- `macos_open_app`: open an app with background-launch intent and focus restoration.
 - `macos_list_apps`: list running apps, optionally including background agents.
 - `macos_list_windows`: list visible windows and geometry.
 - `macos_snapshot`: capture applications, windows, accessibility elements, and virtual cursors.

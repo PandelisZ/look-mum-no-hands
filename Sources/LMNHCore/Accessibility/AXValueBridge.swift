@@ -42,6 +42,13 @@ public struct AXValueBridge: Sendable {
     }
 
     public func rangeDescription(from value: Any?) -> String? {
+        guard let range = range(from: value) else {
+            return nil
+        }
+        return "\(range.location):\(range.length)"
+    }
+
+    public func range(from value: Any?) -> CFRange? {
         guard let axValue = axValue(from: value), AXValueGetType(axValue) == .cfRange else {
             return nil
         }
@@ -50,7 +57,12 @@ public struct AXValueBridge: Sendable {
         guard AXValueGetValue(axValue, .cfRange, &range) else {
             return nil
         }
-        return "\(range.location):\(range.length)"
+        return range
+    }
+
+    public func axValue(from range: CFRange) -> AXValue? {
+        var mutableRange = range
+        return AXValueCreate(.cfRange, &mutableRange)
     }
 
     private func axValue(from value: Any?) -> AXValue? {

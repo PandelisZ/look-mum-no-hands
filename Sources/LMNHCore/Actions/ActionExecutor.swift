@@ -78,45 +78,198 @@ public final class ActionExecutor {
         value: String,
         confirmationToken: String? = nil
     ) -> MacOSActionResult {
+        setText(
+            snapshotId: snapshotId,
+            elementId: elementId,
+            text: value,
+            mode: .replace,
+            confirmationToken: confirmationToken
+        ).action
+    }
+
+    public func setText(
+        snapshotId: String,
+        elementId: String,
+        text: String,
+        mode: TextEntryMutationMode,
+        confirmationToken: String? = nil
+    ) -> TextEntryResult {
+        let requested = "focusless AXValue \(mode.rawValue) on \(elementId)"
+        var diagnostics = TextEntryDiagnostics(
+            method: "ax_set_value",
+            requestedMode: mode.rawValue,
+            insertedLength: text.utf16.count,
+            fallbackPolicy: "keyboard_and_paste_not_attempted_to_preserve_focus"
+        )
+
         guard let registered = elementRegistry.resolve(snapshotId: snapshotId, elementId: elementId) else {
-            return failedResult(
-                requested: "set AXValue on \(elementId)",
+            diagnostics.failureReason = "stale_element"
+            return TextEntryResult(action: failedResult(
+                requested: requested,
                 layer: .semanticAX,
                 elementId: elementId,
                 error: nil,
                 warning: "stale_element: element id is not in the registry"
-            )
+            ), diagnostics: diagnostics)
         }
 
-        let textRisk = safetyClassifier.classifyText(value)
-        let requiresConfirmation = registered.record.risk.requiresConfirmation || textRisk?.requiresConfirmation == true
-        if requiresConfirmation && confirmationToken == nil {
-            let reasons = (registered.record.risk.reasons + (textRisk?.reasons ?? [])).joined(separator: ", ")
-            return requiresConfirmationResult(
-                requested: "set AXValue on \(elementId)",
+        diagnostics.role = registered.record.role
+        diagnostics.settableAttributes = axClient.settableAttributes(of: registered.handle)
+        diagnostics.valueWasSettable = diagnostics.settableAttributes.contains(AXNames.Attribute.value)
+        diagnostics.originalLength = axClient.stringAttribute(AXNames.Attribute.value, of: registered.handle)?.utf16.count
+
+        guard registered.record.enabled != false else {
+            diagnostics.failureReason = "target_disabled"
+            return TextEntryResult(action: failedResult(
+                requested: requested,
                 layer: .semanticAX,
-                registered: registered,
-                warning: reasons.isEmpty ? "AXValue mutation requires confirmation" : reasons
-            )
+                elementId: elementId,
+                error: nil,
+                warning: "target_disabled: AXValue mutation requires an enabled input element"
+            ), diagnostics: diagnostics)
         }
 
-        let frontmostBefore = frontmostBundleIdentifier()
-        let error = axClient.setStringValue(value, on: registered.handle)
-        let frontmostAfter = frontmostBundleIdentifier()
+        guard diagnostics.valueWasSettable else {
+            diagnostics.failureReason = "ax_value_not_settable"
+            return TextEntryResult(action: failedResult(
+                requested: requested,
+                layer: .semanticAX,
+                elementId: elementId,
+                error: nil,
+                warning: "ax_value_not_settable: \(AXNames.Attribute.value) is not settable on this element"
+            ), diagnostics: diagnostics)
+        }
 
-        return MacOSActionResult(
-            requested: "set AXValue on \(elementId)",
-            status: error == .success ? .completed : .failed,
-            executionLayer: .semanticAX,
-            focusPolicy: focusPolicy(error: error, before: frontmostBefore, after: frontmostAfter),
-            frontmostBefore: frontmostBefore,
-            frontmostAfter: frontmostAfter,
-            targetBundleIdentifier: registered.record.bundleIdentifier,
-            targetProcessIdentifier: registered.record.processIdentifier,
-            elementId: elementId,
-            point: registered.record.frame?.center,
-            error: error == .success ? nil : AXErrorInfo(error),
-            warnings: focusWarnings(error: error, before: frontmostBefore, after: frontmostAfter)
+        switch makeTextMutation(mode: mode, text: text, registered: registered) {
+        case .failure(let reason, let selectedRange):
+            diagnostics.failureReason = reason
+            diagnostics.selectedRange = selectedRange
+            return TextEntryResult(action: failedResult(
+                requested: requested,
+                layer: .semanticAX,
+                elementId: elementId,
+                error: nil,
+                warning: reason
+            ), diagnostics: diagnostics)
+
+        case .success(let finalValue, let effectiveMode, let selectedRange):
+            diagnostics.effectiveMode = effectiveMode.rawValue
+            diagnostics.selectedRange = selectedRange
+            diagnostics.resultingLength = finalValue.utf16.count
+
+            let textRisk = safetyClassifier.classifyText(finalValue)
+            let requiresConfirmation = registered.record.risk.requiresConfirmation || textRisk?.requiresConfirmation == true
+            if requiresConfirmation && confirmationToken == nil {
+                let reasons = (registered.record.risk.reasons + (textRisk?.reasons ?? [])).joined(separator: ", ")
+                diagnostics.failureReason = "requires_confirmation"
+                return TextEntryResult(action: requiresConfirmationResult(
+                    requested: requested,
+                    layer: .semanticAX,
+                    registered: registered,
+                    warning: reasons.isEmpty ? "AXValue mutation requires confirmation" : reasons
+                ), diagnostics: diagnostics)
+            }
+
+            let frontmostBefore = frontmostBundleIdentifier()
+            let error = axClient.setStringValue(finalValue, on: registered.handle)
+            if error == .success {
+                updateSelectedRangeAfterMutationIfPossible(
+                    mode: effectiveMode,
+                    insertedLength: text.utf16.count,
+                    selectedRange: selectedRange,
+                    registered: registered
+                )
+            }
+            let frontmostAfter = frontmostBundleIdentifier()
+            diagnostics.failureReason = error == .success ? nil : "ax_set_value_failed"
+
+            return TextEntryResult(
+                action: MacOSActionResult(
+                    requested: requested,
+                    status: error == .success ? .completed : .failed,
+                    executionLayer: .semanticAX,
+                    focusPolicy: focusPolicy(error: error, before: frontmostBefore, after: frontmostAfter),
+                    frontmostBefore: frontmostBefore,
+                    frontmostAfter: frontmostAfter,
+                    targetBundleIdentifier: registered.record.bundleIdentifier,
+                    targetProcessIdentifier: registered.record.processIdentifier,
+                    elementId: elementId,
+                    point: registered.record.frame?.center,
+                    error: error == .success ? nil : AXErrorInfo(error),
+                    warnings: focusWarnings(error: error, before: frontmostBefore, after: frontmostAfter)
+                ),
+                diagnostics: diagnostics
+            )
+        }
+    }
+
+    private enum TextMutation {
+        case success(finalValue: String, effectiveMode: TextEntryMutationMode, selectedRange: String?)
+        case failure(reason: String, selectedRange: String?)
+    }
+
+    private func makeTextMutation(
+        mode: TextEntryMutationMode,
+        text: String,
+        registered: RegisteredElement
+    ) -> TextMutation {
+        switch mode {
+        case .replace:
+            return .success(finalValue: text, effectiveMode: .replace, selectedRange: nil)
+        case .append:
+            guard let currentValue = axClient.stringAttribute(AXNames.Attribute.value, of: registered.handle) else {
+                return .failure(reason: "ax_value_unavailable_for_append", selectedRange: nil)
+            }
+            return .success(finalValue: currentValue + text, effectiveMode: .append, selectedRange: nil)
+        case .selection:
+            guard let currentValue = axClient.stringAttribute(AXNames.Attribute.value, of: registered.handle) else {
+                return .failure(reason: "ax_value_unavailable_for_selection_replacement", selectedRange: nil)
+            }
+            guard let selectedRange = axClient.rangeAttribute(AXNames.Attribute.selectedTextRange, of: registered.handle) else {
+                return .failure(reason: "selected_text_range_unavailable", selectedRange: nil)
+            }
+            let nsValue = currentValue as NSString
+            guard selectedRange.location >= 0,
+                  selectedRange.length >= 0,
+                  selectedRange.location <= nsValue.length,
+                  selectedRange.location + selectedRange.length <= nsValue.length else {
+                return .failure(
+                    reason: "selected_text_range_out_of_bounds",
+                    selectedRange: "\(selectedRange.location):\(selectedRange.length)"
+                )
+            }
+            let finalValue = nsValue.replacingCharacters(
+                in: NSRange(location: selectedRange.location, length: selectedRange.length),
+                with: text
+            )
+            return .success(
+                finalValue: finalValue,
+                effectiveMode: .selection,
+                selectedRange: "\(selectedRange.location):\(selectedRange.length)"
+            )
+        }
+    }
+
+    private func updateSelectedRangeAfterMutationIfPossible(
+        mode: TextEntryMutationMode,
+        insertedLength: Int,
+        selectedRange: String?,
+        registered: RegisteredElement
+    ) {
+        guard mode == .selection,
+              let selectedRange,
+              axClient.isAttributeSettable(AXNames.Attribute.selectedTextRange, of: registered.handle) else {
+            return
+        }
+
+        let parts = selectedRange.split(separator: ":", maxSplits: 1).compactMap { Int($0) }
+        guard parts.count == 2 else {
+            return
+        }
+
+        _ = axClient.setRangeValue(
+            CFRange(location: parts[0] + insertedLength, length: 0),
+            on: registered.handle
         )
     }
 

@@ -6,6 +6,13 @@ import SwiftUI
 struct LMNHControlApp: App {
     @StateObject private var model = ControlPanelModel()
 
+    init() {
+        if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApplication.shared.applicationIconImage = icon
+        }
+    }
+
     var body: some Scene {
         WindowGroup("Look Mum No Hands") {
             ControlPanelView(model: model)
@@ -14,14 +21,16 @@ struct LMNHControlApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandMenu("LMNH") {
-                Button("Start Diagnostic MCP Server") { model.startMCPServer() }
+                Button("Start HTTP MCP Server") { model.startMCPServer() }
                     .disabled(model.isMCPServerRunning)
-                Button("Stop Diagnostic MCP Server") { model.stopMCPServer() }
+                Button("Stop HTTP MCP Server") { model.stopMCPServer() }
                     .disabled(!model.isMCPServerRunning)
+                Button("Copy HTTP MCP URL") { model.copyMCPServerURL() }
                 Divider()
                 Button("Install Cursor MCP Plugin") { model.installCursorPlugin() }
                 Button("Install Codex MCP Plugin") { model.installCodexPlugin() }
-                Button("Install Cursor + Codex Plugins") { model.installAllPlugins() }
+                Button("Install Claude MCP Plugin") { model.installClaudePlugin() }
+                Button("Install Cursor + Codex + Claude Plugins") { model.installAllPlugins() }
                 Divider()
                 Button("Reveal Project") { model.revealProject() }
             }
@@ -30,18 +39,19 @@ struct LMNHControlApp: App {
 }
 
 @MainActor
-private final class ControlPanelModel: ObservableObject {
+final class ControlPanelModel: ObservableObject {
     @Published var permissionStatus: MacOSPermissionStatus = PermissionStatusReader().current()
     @Published var appearance: VirtualCursorAppearance = .load()
     @Published var logEntries: [LogEntry] = []
     @Published var saveMessage: String = ""
     @Published var installMessage: String = ""
     @Published var isMCPServerRunning: Bool = false
-    @Published var mcpServerPID: Int32?
+    @Published var mcpServerPort: UInt16 = HTTPMCPServer.defaultPort
+    @Published var mcpServerURL: String = "http://127.0.0.1:\(HTTPMCPServer.defaultPort)\(HTTPMCPServer.defaultPath)"
 
     private let permissionReader = PermissionStatusReader()
     private var timer: Timer?
-    private var mcpProcess: Process?
+    private var httpMCPServer: HTTPMCPServer?
 
     init() {
         refresh()
@@ -61,13 +71,7 @@ private final class ControlPanelModel: ObservableObject {
 
     func refresh() {
         permissionStatus = permissionReader.current()
-        appearance = VirtualCursorAppearance.load()
         logEntries = readTail(of: LMNHPaths.mcpLogFile, maxLines: 160)
-        if let mcpProcess, !mcpProcess.isRunning {
-            self.mcpProcess = nil
-            isMCPServerRunning = false
-            mcpServerPID = nil
-        }
     }
 
     func saveAppearance() {
@@ -94,6 +98,7 @@ private final class ControlPanelModel: ObservableObject {
         next.showLabels = previous.showLabels
         next.showPath = previous.showPath
         appearance = next
+        saveAppearance()
     }
 
     func openAccessibilitySettings() {
@@ -105,50 +110,49 @@ private final class ControlPanelModel: ObservableObject {
     }
 
     func startMCPServer() {
-        guard mcpProcess?.isRunning != true else {
+        guard !isMCPServerRunning else {
             return
         }
 
-        let process = Process()
-        process.executableURL = Self.mcpBinaryURL
-        process.currentDirectoryURL = LMNHPaths.projectRoot
-        process.environment = ProcessInfo.processInfo.environment.merging([
-            "LMNH_PROJECT_ROOT": LMNHPaths.projectRoot.path
-        ]) { _, new in new }
-        process.standardInput = Pipe()
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        process.terminationHandler = { [weak self] finished in
-            Task { @MainActor in
-                self?.installMessage = "Diagnostic MCP server exited with status \(finished.terminationStatus)"
-                self?.isMCPServerRunning = false
-                self?.mcpServerPID = nil
-                self?.mcpProcess = nil
-            }
-        }
+        let service = DefaultMacOSAutomationService()
+        let router = MCPRequestRouter(toolRouter: MCPToolRouter(service: service))
+        let server = HTTPMCPServer(router: router, port: mcpServerPort)
+        httpMCPServer = server
+        installMessage = "Starting HTTP MCP server..."
 
-        do {
-            try process.run()
-            mcpProcess = process
-            isMCPServerRunning = true
-            mcpServerPID = process.processIdentifier
-            installMessage = "Started diagnostic MCP server (pid \(process.processIdentifier)). Cursor/Codex still launch their own MCP server instances."
-        } catch {
-            installMessage = "Failed to start MCP server: \(error.localizedDescription)"
+        Task { @MainActor in
+            do {
+                let status = try await server.start(port: mcpServerPort)
+                isMCPServerRunning = status.isRunning
+                mcpServerPort = status.port
+                mcpServerURL = status.url
+                installMessage = "HTTP MCP server listening at \(status.url). Cursor/Codex stdio configs still launch lmnh-mcp."
+            } catch {
+                httpMCPServer = nil
+                isMCPServerRunning = false
+                installMessage = "Failed to start HTTP MCP server: \(error.localizedDescription)"
+            }
         }
     }
 
     func stopMCPServer() {
-        guard let process = mcpProcess else {
-            installMessage = "No diagnostic MCP server is running."
+        guard let server = httpMCPServer else {
+            installMessage = "No HTTP MCP server is running."
             return
         }
 
-        process.terminate()
-        mcpProcess = nil
+        Task {
+            await server.stop()
+        }
+        httpMCPServer = nil
         isMCPServerRunning = false
-        mcpServerPID = nil
-        installMessage = "Stopped diagnostic MCP server."
+        installMessage = "Stopped HTTP MCP server."
+    }
+
+    func copyMCPServerURL() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(mcpServerURL, forType: .string)
+        installMessage = "Copied HTTP MCP URL: \(mcpServerURL)"
     }
 
     func installCursorPlugin() {
@@ -187,11 +191,52 @@ private final class ControlPanelModel: ObservableObject {
         }
     }
 
+    func installClaudePlugin() {
+        let binaryPath = Self.mcpBinaryURL.path
+        let skillSource = LMNHPaths.projectRoot
+            .appending(path: "plugins", directoryHint: .isDirectory)
+            .appending(path: "look-mum-no-hands", directoryHint: .isDirectory)
+            .appending(path: "skills", directoryHint: .isDirectory)
+            .appending(path: "look-mum-no-hands", directoryHint: .isDirectory)
+        let claudeSkillsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: ".claude", directoryHint: .isDirectory)
+            .appending(path: "skills", directoryHint: .isDirectory)
+        let skillDestination = claudeSkillsDir.appending(path: "look-mum-no-hands", directoryHint: .isDirectory)
+
+        var messages: [String] = []
+
+        let command = """
+        claude mcp remove look-mum-no-hands-dev >/dev/null 2>&1 || true
+        claude mcp add --scope user look-mum-no-hands-dev -- \(Self.shellQuote(binaryPath))
+        """
+        let result = Self.runShell(command)
+        if result.status == 0 {
+            messages.append("Registered Claude MCP server: look-mum-no-hands-dev")
+        } else {
+            messages.append("Failed to register Claude MCP server: \(result.output)")
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: claudeSkillsDir, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: skillDestination.path) {
+                try FileManager.default.removeItem(at: skillDestination)
+            }
+            try FileManager.default.createSymbolicLink(at: skillDestination, withDestinationURL: skillSource)
+            messages.append("Linked Claude skill at \(skillDestination.path)")
+        } catch {
+            messages.append("Failed to link Claude skill: \(error.localizedDescription)")
+        }
+
+        installMessage = messages.joined(separator: "\n")
+    }
+
     func installAllPlugins() {
         installCursorPlugin()
         let cursorMessage = installMessage
         installCodexPlugin()
-        installMessage = "\(cursorMessage)\n\(installMessage)"
+        let codexMessage = installMessage
+        installClaudePlugin()
+        installMessage = "\(cursorMessage)\n\(codexMessage)\n\(installMessage)"
     }
 
     func revealProject() {
@@ -265,221 +310,5 @@ private final class ControlPanelModel: ObservableObject {
         } catch {
             return (1, error.localizedDescription)
         }
-    }
-}
-
-private struct ControlPanelView: View {
-    @ObservedObject var model: ControlPanelModel
-
-    var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                permissionCard
-                serverCard
-                cursorCard
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            .frame(width: 360)
-            .background(.regularMaterial)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("MCP Debug Log")
-                            .font(.title2.weight(.semibold))
-                        Text("Polling \(LMNHPaths.mcpLogFile.path)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text("\(model.logEntries.count) lines")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                logView
-            }
-            .padding(24)
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Look Mum No Hands")
-                .font(.largeTitle.weight(.bold))
-            Text("Focusless macOS control with an animated virtual cursor.")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var permissionCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Permissions")
-                .font(.headline)
-            PermissionRow(title: "Accessibility", state: model.permissionStatus.accessibility)
-            PermissionRow(title: "Screen Recording", state: model.permissionStatus.screenCapture)
-            HStack {
-                Button("Accessibility Settings") { model.openAccessibilitySettings() }
-                Button("Screen Recording") { model.openScreenRecordingSettings() }
-            }
-            .buttonStyle(.bordered)
-            Text("Settings \(LMNHPaths.stateDirectory.path)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("Process \(model.permissionStatus.processIdentifier)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18).fill(.background.opacity(0.72)))
-    }
-
-    private var serverCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("MCP Server")
-                .font(.headline)
-            HStack {
-                Circle()
-                    .fill(model.isMCPServerRunning ? Color.green : Color.secondary)
-                    .frame(width: 10, height: 10)
-                Text(model.isMCPServerRunning ? "Diagnostic server running" : "Diagnostic server stopped")
-                Spacer()
-                if let pid = model.mcpServerPID {
-                    Text("pid \(pid)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            HStack {
-                Button("Start") { model.startMCPServer() }
-                    .disabled(model.isMCPServerRunning)
-                Button("Stop") { model.stopMCPServer() }
-                    .disabled(!model.isMCPServerRunning)
-            }
-            .buttonStyle(.bordered)
-
-            HStack {
-                Button("Install Cursor") { model.installCursorPlugin() }
-                Button("Install Codex") { model.installCodexPlugin() }
-            }
-            .buttonStyle(.bordered)
-
-            Button("Install Both Plugins") { model.installAllPlugins() }
-                .buttonStyle(.borderedProminent)
-
-            if !model.installMessage.isEmpty {
-                Text(model.installMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18).fill(.background.opacity(0.72)))
-    }
-
-    private var cursorCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Virtual Cursor")
-                .font(.headline)
-            CursorPreview(appearance: model.appearance)
-                .frame(height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-            Picker("Mouse", selection: themeBinding) {
-                ForEach(VirtualCursorTheme.allCases) { theme in
-                    Text(theme.displayName).tag(theme)
-                }
-            }
-            .pickerStyle(.menu)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
-                ForEach(VirtualCursorTheme.allCases) { theme in
-                    Button(theme.displayName) {
-                        model.applyTheme(theme)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-
-            if model.appearance.normalized.theme.usesTint {
-                SliderRow(title: "Red", value: $model.appearance.red, range: 0...1)
-                SliderRow(title: "Green", value: $model.appearance.green, range: 0...1)
-                SliderRow(title: "Blue", value: $model.appearance.blue, range: 0...1)
-            } else if let attribution = VirtualCursorArtwork.attribution(for: model.appearance.normalized.theme) {
-                Text(attribution)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            SliderRow(title: "Scale", value: $model.appearance.scale, range: 0.5...2.5)
-            SliderRow(title: "Easing Duration", value: $model.appearance.animationDuration, range: 0.05...2.0)
-            Toggle("Show labels", isOn: $model.appearance.showLabels)
-            Toggle("Show path", isOn: $model.appearance.showPath)
-
-            HStack {
-                Button("Save") { model.saveAppearance() }
-                    .keyboardShortcut("s")
-                Button("Reset Pink") { model.resetAppearance() }
-            }
-            .buttonStyle(.borderedProminent)
-
-            if !model.saveMessage.isEmpty {
-                Text(model.saveMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 18).fill(.background.opacity(0.72)))
-    }
-
-    private var themeBinding: Binding<VirtualCursorTheme> {
-        Binding(
-            get: { model.appearance.theme },
-            set: { model.applyTheme($0) }
-        )
-    }
-
-    private var logView: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text("time").frame(width: 92, alignment: .leading)
-                Text("status").frame(width: 56, alignment: .leading)
-                Text("tool").frame(width: 190, alignment: .leading)
-                Text("message").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.caption2.monospaced().weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.black.opacity(0.22))
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(model.logEntries) { entry in
-                            LogRow(entry: entry)
-                                .id(entry.id)
-                        }
-                    }
-                }
-                .background(.black.opacity(0.16))
-                .onChange(of: model.logEntries) { _, entries in
-                    guard let last = entries.last else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        )
     }
 }

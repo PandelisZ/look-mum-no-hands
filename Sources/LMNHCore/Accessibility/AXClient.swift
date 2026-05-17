@@ -107,10 +107,18 @@ public struct AXClient: Sendable {
     public func settableAttributes(of element: AXElementHandle, within attributeNames: [String]? = nil) -> [String] {
         let names = attributeNames ?? self.attributeNames(of: element)
         return names.filter { name in
-            var settable = DarwinBoolean(false)
-            let error = AXUIElementIsAttributeSettable(element.raw, name as CFString, &settable)
-            return error == .success && settable.boolValue
+            isAttributeSettable(name, of: element)
         }
+    }
+
+    public func isAttributeSettable(_ attribute: String, of element: AXElementHandle) -> Bool {
+        var settable = DarwinBoolean(false)
+        let error = AXUIElementIsAttributeSettable(element.raw, attribute as CFString, &settable)
+        return error == .success && settable.boolValue
+    }
+
+    public func rangeAttribute(_ attribute: String, of element: AXElementHandle) -> CFRange? {
+        valueBridge.range(from: attributeValue(attribute, of: element))
     }
 
     @discardableResult
@@ -121,6 +129,14 @@ public struct AXClient: Sendable {
     @discardableResult
     public func setStringValue(_ value: String, on element: AXElementHandle, attribute: String = AXNames.Attribute.value) -> AXError {
         AXUIElementSetAttributeValue(element.raw, attribute as CFString, value as CFString)
+    }
+
+    @discardableResult
+    public func setRangeValue(_ value: CFRange, on element: AXElementHandle, attribute: String = AXNames.Attribute.selectedTextRange) -> AXError {
+        guard let axValue = valueBridge.axValue(from: value) else {
+            return .failure
+        }
+        return AXUIElementSetAttributeValue(element.raw, attribute as CFString, axValue)
     }
 
     public func elementAtPosition(_ point: CGPoint, processIdentifier: Int32? = nil) -> Result<AXElementHandle, AXErrorInfo> {

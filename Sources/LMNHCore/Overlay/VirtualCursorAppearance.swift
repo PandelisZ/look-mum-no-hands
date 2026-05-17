@@ -2,47 +2,51 @@ import Foundation
 
 public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sendable {
     case pinkArrow = "pink_arrow"
-    case classicMac = "classic_mac"
-    case windows2000 = "windows_2000"
-    case aquaBubble = "aqua_bubble"
-    case limePixel = "lime_pixel"
-    case goldenGlove = "golden_glove"
-    case rocket = "rocket"
-    case realWorldBlueSilver = "real_world_blue_silver"
-    case realWorldAppStarting = "real_world_app_starting"
-    case realWorldBusy = "real_world_busy"
+    case customCurser = "custom_curser"
+    case flameBlack = "flame_black"
+    case tardis = "tardis"
+    case crosshairGreen = "crosshair_green"
+    case gunAdvanced = "gun_advanced"
+    case shiningSword = "shining_sword"
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
         case .pinkArrow: "Pink LMNH"
-        case .classicMac: "Classic Mac"
-        case .windows2000: "Windows 2000"
-        case .aquaBubble: "Aqua Bubble"
-        case .limePixel: "Lime Pixel"
-        case .goldenGlove: "Golden Glove"
-        case .rocket: "Rocket"
-        case .realWorldBlueSilver: "RW Blue-Silver"
-        case .realWorldAppStarting: "RW App Starting"
-        case .realWorldBusy: "RW Busy"
+        case .customCurser: "Custom Cursor"
+        case .flameBlack: "Flame 2black"
+        case .tardis: "TARDIS"
+        case .crosshairGreen: "Crosshair Green"
+        case .gunAdvanced: "Gun Advanced"
+        case .shiningSword: "Shining Sword"
         }
     }
 
     public var usesTint: Bool {
         switch self {
-        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
-            false
-        case .pinkArrow, .classicMac, .windows2000, .aquaBubble, .limePixel, .goldenGlove, .rocket:
+        case .pinkArrow:
             true
+        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword:
+            false
         }
     }
 
     public var sourceAttribution: String? {
         switch self {
-        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
-            "RealWorld 3D Blue-Silver Cursors by Vlasta, CC BY, rw-designer.com"
-        case .pinkArrow, .classicMac, .windows2000, .aquaBubble, .limePixel, .goldenGlove, .rocket:
+        case .customCurser:
+            "custom curser.ani, CC BY, rw-designer.com"
+        case .flameBlack:
+            "flame 2black.ani, CC BY, rw-designer.com"
+        case .tardis:
+            "TARDIS.ani by Vlasta, CC BY, rw-designer.com"
+        case .crosshairGreen:
+            "Crosshair Cursors by morten8035, CC BY, rw-designer.com"
+        case .gunAdvanced:
+            "Gun Advanced Cursors by The Sword of the Heart, CC BY, rw-designer.com"
+        case .shiningSword:
+            "Swords Cursors by Mr. Zidgel, CC BY, rw-designer.com"
+        case .pinkArrow:
             nil
         }
     }
@@ -51,25 +55,15 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .pinkArrow:
             VirtualCursorAppearance(theme: self, red: 1.0, green: 0.18, blue: 0.62)
-        case .classicMac:
-            VirtualCursorAppearance(theme: self, red: 0.08, green: 0.08, blue: 0.08)
-        case .windows2000:
-            VirtualCursorAppearance(theme: self, red: 0.05, green: 0.22, blue: 0.85)
-        case .aquaBubble:
-            VirtualCursorAppearance(theme: self, red: 0.12, green: 0.78, blue: 1.0)
-        case .limePixel:
-            VirtualCursorAppearance(theme: self, red: 0.52, green: 1.0, blue: 0.08)
-        case .goldenGlove:
-            VirtualCursorAppearance(theme: self, red: 1.0, green: 0.72, blue: 0.16)
-        case .rocket:
-            VirtualCursorAppearance(theme: self, red: 1.0, green: 0.25, blue: 0.18)
-        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
+        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword:
             VirtualCursorAppearance(theme: self, red: 0.18, green: 0.54, blue: 1.0)
         }
     }
 }
 
 public struct VirtualCursorAppearance: Codable, Equatable, Sendable {
+    public static let didChangeNotification = Notification.Name("com.look-mum-no-hands.cursor-appearance.changed")
+
     public var theme: VirtualCursorTheme
     public var red: Double
     public var green: Double
@@ -128,6 +122,12 @@ public struct VirtualCursorAppearance: Codable, Equatable, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(normalized).write(to: LMNHPaths.cursorAppearanceFile, options: .atomic)
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.didChangeNotification,
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
     }
 
     public var normalized: VirtualCursorAppearance {

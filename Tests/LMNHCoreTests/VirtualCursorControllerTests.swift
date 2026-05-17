@@ -76,9 +76,12 @@ final class VirtualCursorControllerTests: XCTestCase {
     @MainActor
     func testBitmapCursorThemesLoadBundledFrames() {
         let themes: [VirtualCursorTheme] = [
-            .realWorldBlueSilver,
-            .realWorldAppStarting,
-            .realWorldBusy
+            .customCurser,
+            .flameBlack,
+            .tardis,
+            .crosshairGreen,
+            .gunAdvanced,
+            .shiningSword
         ]
 
         for theme in themes {

@@ -1,6 +1,6 @@
 interface:
   display_name: "Look Mum No Hands"
-  short_description: "Inspect and control local macOS UI through the LMNH MCP tools."
+  short_description: "Inspect and control local macOS UI through the LMNH MCP tools, without AppleScript or osascript UI automation."
   icon_small: ""
   icon_large: ""
-  default_prompt: "Use Look Mum No Hands to inspect my desktop and target the right UI element."
+  default_prompt: "Use Look Mum No Hands MCP tools to inspect my desktop and target the right UI element. Do not use osascript, AppleScript, System Events, shell keyboard events, or ad hoc app scripting for UI control; let the LMNH MCP tools do the UI operation."

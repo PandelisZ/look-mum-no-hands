@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 public protocol LMNHMacOSAutomationServing: Sendable {
     func permissionStatus(arguments: MCPJSONObject) async -> MCPToolResult
+    func openApp(arguments: MCPJSONObject) async -> MCPToolResult
     func listApps(arguments: MCPJSONObject) async -> MCPToolResult
     func listWindows(arguments: MCPJSONObject) async -> MCPToolResult
     func snapshot(arguments: MCPJSONObject) async -> MCPToolResult
@@ -32,6 +33,10 @@ public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sen
             toolName: LMNHMCPTools.listApps,
             summary: "Running application service is not wired yet."
         )
+    }
+
+    public func openApp(arguments: MCPJSONObject) async -> MCPToolResult {
+        placeholderResult(toolName: LMNHMCPTools.openApp, summary: "App launcher service is not wired yet.")
     }
 
     public func listWindows(arguments: MCPJSONObject) async -> MCPToolResult {
@@ -109,6 +114,7 @@ public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sen
 public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @unchecked Sendable {
     private let permissionReader: PermissionStatusReader
     private let applicationProvider: RunningApplicationProvider
+    private let appLauncher: AppLauncher
     private let windowInventory: WindowInventory
     private let snapshotService: SnapshotService
     private let cursorController: VirtualCursorController
@@ -124,6 +130,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         self.permissionReader = permissionReader
         self.windowInventory = windowInventory
         self.applicationProvider = RunningApplicationProvider(windowInventory: windowInventory)
+        self.appLauncher = AppLauncher()
         self.snapshotService = SnapshotService(
             elementRegistry: elementRegistry,
             permissionReader: permissionReader,
@@ -154,6 +161,26 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             structuredContent: [
                 "applications": applications
             ]
+        )
+    }
+
+    public func openApp(arguments: MCPJSONObject) async -> MCPToolResult {
+        let result = await appLauncher.openApp(
+            bundleIdentifier: arguments["bundle_id"]?.stringValue,
+            appPath: arguments["app_path"]?.stringValue,
+            appName: arguments["app_name"]?.stringValue,
+            background: arguments["background"]?.boolValue ?? true,
+            restoreFocus: arguments["restore_focus"]?.boolValue ?? true
+        )
+
+        return encodedToolResult(
+            summary: result.status == "completed"
+                ? "Opened \(result.launchedApplicationName ?? result.bundleIdentifier ?? result.requested) with focus policy \(result.focusPolicy.rawValue)."
+                : "Failed to open \(result.requested): \(result.error ?? "unknown error")",
+            structuredContent: [
+                "launch": result
+            ],
+            isError: result.status != "completed"
         )
     }
 
@@ -397,11 +424,27 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         let method = arguments["method"]?.stringValue ?? "auto"
         guard method == "auto" || method == "ax_set_value" else {
             return MCPToolResult.text(
-                "Text method \(method) is not wired in this MCP transport slice.",
+                "Text method \(method) is not focusless in this transport slice; no keyboard or paste fallback was attempted.",
                 structuredContent: .object([
                     "method": .string(method),
                     "status": .string("not_implemented"),
-                    "integration_todo": .string("Wire pasteboard or keystroke text entry service.")
+                    "focus_policy": .string("no_focus_change"),
+                    "execution_layer": .string(ActionExecutionLayer.semanticAX.rawValue),
+                    "real_mouse_moved": .bool(false),
+                    "fallback_policy": .string("keyboard_and_paste_not_attempted_to_preserve_focus"),
+                    "integration_todo": .string("Wire an explicit opt-in pasteboard or keystroke text entry service that reports focus handoff.")
+                ]),
+                isError: true
+            )
+        }
+
+        guard let mode = TextEntryMutationMode(rawValue: arguments["mode"]?.stringValue ?? "replace") else {
+            return MCPToolResult.text(
+                "macos_type_text mode must be replace, append, or selection.",
+                structuredContent: .object([
+                    "tool": .string(LMNHMCPTools.typeText),
+                    "status": .string("invalid_arguments"),
+                    "valid_modes": .array(["replace", "append", "selection"].map { .string($0) })
                 ]),
                 isError: true
             )
@@ -416,17 +459,27 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             return staleElementResult(snapshotID: snapshotID, elementID: elementID)
         }
 
-        let result = actionExecutor.setValue(
+        let textEntry = actionExecutor.setText(
             snapshotId: snapshotID,
             elementId: elementID,
-            value: text,
+            text: text,
+            mode: mode,
             confirmationToken: arguments["confirmation_token"]?.stringValue
         )
-        let cursor = setCursor(for: result, element: element.record, state: result.status == .completed ? .typing : .blocked)
+        let result = textEntry.action
+        let cursor = setCursor(
+            for: result,
+            element: element.record,
+            state: result.status == .completed ? .typing : .blocked,
+            sessionID: arguments["session_id"]?.stringValue ?? "default"
+        )
 
-        return actionToolResult(
-            summary: result.status == .completed ? "Set text on \(elementID) with AXValue." : "Failed to set text on \(elementID) with AXValue.",
+        return textEntryToolResult(
+            summary: result.status == .completed
+                ? "Updated text on \(elementID) with focusless AXValue \(mode.rawValue)."
+                : "Failed focusless AXValue \(mode.rawValue) on \(elementID).",
             result: result,
+            diagnostics: textEntry.diagnostics,
             virtualCursor: cursor
         )
     }
@@ -477,7 +530,8 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
     private func setCursor(
         for result: MacOSActionResult,
         element: AccessibilityElementRecord?,
-        state: VirtualCursorState
+        state: VirtualCursorState,
+        sessionID: String = "default"
     ) -> VirtualCursorRecord {
         let point = result.point.map {
             VirtualCursorPoint(x: $0.x, y: $0.y)
@@ -489,8 +543,8 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         )
         let target = element.map(cursorTarget(for:)) ?? fallbackTarget
         return cursorController.setCursor(
-            cursorID: "cursor_default",
-            sessionID: "default",
+            cursorID: "cursor_\(sessionID)",
+            sessionID: sessionID,
             state: state,
             target: target,
             lastToolCallID: result.actionId,
@@ -509,6 +563,23 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             summary: summary,
             structuredContent: [
                 "action": result,
+                "virtual_cursor": virtualCursor
+            ],
+            isError: result.status == .failed
+        )
+    }
+
+    private func textEntryToolResult(
+        summary: String,
+        result: MacOSActionResult,
+        diagnostics: TextEntryDiagnostics,
+        virtualCursor: VirtualCursorRecord
+    ) -> MCPToolResult {
+        encodedToolResult(
+            summary: summary,
+            structuredContent: [
+                "action": result,
+                "typing": diagnostics,
                 "virtual_cursor": virtualCursor
             ],
             isError: result.status == .failed
@@ -579,6 +650,8 @@ public actor MCPToolRouter {
         let result = switch name {
         case LMNHMCPTools.permissionStatus:
             await service.permissionStatus(arguments: arguments)
+        case LMNHMCPTools.openApp:
+            await service.openApp(arguments: arguments)
         case LMNHMCPTools.listApps:
             await service.listApps(arguments: arguments)
         case LMNHMCPTools.listWindows:

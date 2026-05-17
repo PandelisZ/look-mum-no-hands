@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "LMNHCore", targets: ["LMNHCore"]),
         .executable(name: "lmnh-mcp", targets: ["LMNHMCP"]),
+        .executable(name: "lmnh-mcp-http", targets: ["LMNHHTTPMCP"]),
         .executable(name: "lmnh-control", targets: ["LMNHControlApp"])
     ],
     targets: [
@@ -24,6 +25,11 @@ let package = Package(
             name: "LMNHMCP",
             dependencies: ["LMNHCore"],
             path: "Sources/LMNHMCP"
+        ),
+        .executableTarget(
+            name: "LMNHHTTPMCP",
+            dependencies: ["LMNHCore"],
+            path: "Sources/LMNHHTTPMCP"
         ),
         .executableTarget(
             name: "LMNHControlApp",

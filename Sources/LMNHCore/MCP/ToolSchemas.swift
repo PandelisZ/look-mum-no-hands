@@ -2,6 +2,7 @@ import Foundation
 
 public enum LMNHMCPTools {
     public static let permissionStatus = "macos_permission_status"
+    public static let openApp = "macos_open_app"
     public static let listApps = "macos_list_apps"
     public static let listWindows = "macos_list_windows"
     public static let snapshot = "macos_snapshot"
@@ -20,6 +21,39 @@ public enum LMNHMCPTools {
             description: "Report macOS Accessibility, Screen Recording, and input permission status.",
             inputSchema: objectSchema(properties: [:]),
             annotations: .object(["readOnlyHint": .bool(true)])
+        ),
+        MCPToolDefinition(
+            name: openApp,
+            description: "Open a macOS application with background-launch intent and restore the previous frontmost app if macOS focuses the launched app.",
+            inputSchema: objectSchema(
+                properties: [
+                    "bundle_id": .object([
+                        "type": .string("string"),
+                        "description": .string("Preferred application bundle identifier, e.g. com.apple.calculator.")
+                    ]),
+                    "app_path": .object([
+                        "type": .string("string"),
+                        "description": .string("Explicit .app path when bundle_id resolution is not available.")
+                    ]),
+                    "app_name": .object([
+                        "type": .string("string"),
+                        "description": .string("Reserved for future app-name resolution; prefer bundle_id or app_path.")
+                    ]),
+                    "background": .object([
+                        "type": .string("boolean"),
+                        "default": .bool(true)
+                    ]),
+                    "restore_focus": .object([
+                        "type": .string("boolean"),
+                        "default": .bool(true)
+                    ])
+                ]
+            ),
+            annotations: .object([
+                "readOnlyHint": .bool(false),
+                "destructiveHint": .bool(false),
+                "openWorldHint": .bool(true)
+            ])
         ),
         MCPToolDefinition(
             name: listApps,
@@ -190,20 +224,22 @@ public enum LMNHMCPTools {
         ),
         MCPToolDefinition(
             name: typeText,
-            description: "Type, paste, or set text in a target text element.",
+            description: "Mutate text in a target input element without focusing the target window. Uses AXValue by default; paste and keystroke fallbacks are intentionally not attempted unless separately implemented.",
             inputSchema: objectSchema(
                 properties: [
                     "snapshot_id": .object(["type": .string("string")]),
                     "element_id": .object(["type": .string("string")]),
                     "text": .object(["type": .string("string")]),
                     "method": stringEnum(["auto", "ax_set_value", "keystrokes", "paste"], defaultValue: "auto"),
+                    "mode": stringEnum(["replace", "append", "selection"], defaultValue: "replace"),
                     "submit": .object([
                         "type": .string("boolean"),
                         "default": .bool(false)
                     ]),
+                    "session_id": .object(["type": .string("string")]),
                     "confirmation_token": .object(["type": .string("string")])
                 ],
-                required: ["text"]
+                required: ["snapshot_id", "element_id", "text"]
             ),
             annotations: .object([
                 "readOnlyHint": .bool(false),

@@ -10,6 +10,8 @@ public enum AXNames {
         public static let help = "AXHelp"
         public static let value = "AXValue"
         public static let placeholderValue = "AXPlaceholderValue"
+        public static let selectedText = "AXSelectedText"
+        public static let selectedTextRange = "AXSelectedTextRange"
         public static let enabled = "AXEnabled"
         public static let focused = "AXFocused"
         public static let selected = "AXSelected"

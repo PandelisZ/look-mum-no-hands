@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_EXECUTABLE = REPO_ROOT / ".build" / "debug" / "lmnh-mcp"
 EXPECTED_TOOLS = {
     "macos_permission_status",
+    "macos_open_app",
     "macos_list_apps",
     "macos_list_windows",
     "macos_snapshot",
@@ -151,6 +152,18 @@ def main():
                 },
             },
         },
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "macos_type_text",
+                "arguments": {
+                    "text": "smoke",
+                    "method": "paste",
+                },
+            },
+        },
     ]
 
     env = dict(**os.environ, LMNH_OVERLAY_RENDERER="headless")
@@ -179,6 +192,7 @@ def main():
     cursor_response = response_by_id(messages, 6)
     snapshot_response = response_by_id(messages, 7)
     click_response = response_by_id(messages, 8)
+    type_response = response_by_id(messages, 9)
 
     if "Accessibility:" not in permission_text:
         raise AssertionError(f"Unexpected permission response: {permission_text}")
@@ -203,6 +217,28 @@ def main():
         raise AssertionError("Focusless click failure path moved the real mouse")
     if click_result["executionLayer"] != "semantic_ax_at_position":
         raise AssertionError(f"Unexpected click layer: {click_result['executionLayer']}")
+
+    type_tool = next(tool for tool in tools_response["result"]["tools"] if tool["name"] == "macos_type_text")
+    type_schema = type_tool["inputSchema"]["properties"]
+    if "mode" not in type_schema:
+        raise AssertionError("macos_type_text schema does not expose mutation mode")
+    if sorted(type_schema["mode"]["enum"]) != ["append", "replace", "selection"]:
+        raise AssertionError(f"Unexpected type modes: {type_schema['mode']['enum']}")
+
+    type_result = type_response["result"]
+    if not type_result["isError"]:
+        raise AssertionError("paste fallback smoke should be explicitly unsupported")
+    type_structured = type_result["structuredContent"]
+    if type_structured["fallback_policy"] != "keyboard_and_paste_not_attempted_to_preserve_focus":
+        raise AssertionError(f"Unexpected type fallback policy: {type_structured}")
+    if type_structured["real_mouse_moved"]:
+        raise AssertionError("Unsupported text fallback moved the real mouse")
+
+    open_tool = next(tool for tool in tools_response["result"]["tools"] if tool["name"] == "macos_open_app")
+    open_schema = open_tool["inputSchema"]["properties"]
+    for key in ("bundle_id", "app_path", "background", "restore_focus"):
+        if key not in open_schema:
+            raise AssertionError(f"macos_open_app schema missing {key}")
 
     print("MCP smoke passed")
     print(f"tools={len(tool_names)} apps={len(snapshot['applications'])} windows={len(snapshot['windows'])} ax_elements={len(snapshot['accessibilityTree'])}")

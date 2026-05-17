@@ -63,21 +63,7 @@ struct CursorPreview: View {
     }
 
     private func cursorPath(at point: CGPoint, scale: Double) -> Path {
-        let s = CGFloat(scale)
-        switch appearance.normalized.theme {
-        case .pinkArrow, .classicMac, .windows2000:
-            return arrowPath(at: point, scale: s)
-        case .aquaBubble:
-            return arrowPath(at: point, scale: s)
-        case .limePixel:
-            return pixelPath(at: point, scale: s)
-        case .goldenGlove:
-            return glovePath(at: point, scale: s)
-        case .rocket:
-            return rocketPath(at: point, scale: s)
-        case .realWorldBlueSilver, .realWorldAppStarting, .realWorldBusy:
-            return arrowPath(at: point, scale: s)
-        }
+        arrowPath(at: point, scale: CGFloat(scale))
     }
 
     private func arrowPath(at point: CGPoint, scale s: CGFloat) -> Path {
@@ -89,44 +75,63 @@ struct CursorPreview: View {
         return path
     }
 
-    private func pixelPath(at point: CGPoint, scale s: CGFloat) -> Path {
-        let unit = 5 * s
+}
+
+struct CursorThemeThumbnail: View {
+    let appearance: VirtualCursorAppearance
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                let normalized = appearance.normalized
+                let color = Color(
+                    red: normalized.red,
+                    green: normalized.green,
+                    blue: normalized.blue,
+                    opacity: normalized.alpha
+                )
+                let point = CGPoint(x: size.width * 0.24, y: size.height * 0.18)
+
+                if let frame = VirtualCursorArtwork.bitmapFrame(for: normalized.theme, at: timeline.date) {
+                    let fit = min(size.width / frame.baseSize.width, size.height / frame.baseSize.height) * 0.84
+                    let drawSize = CGSize(width: frame.baseSize.width * fit, height: frame.baseSize.height * fit)
+                    let origin = CGPoint(
+                        x: (size.width - drawSize.width) / 2,
+                        y: (size.height - drawSize.height) / 2
+                    )
+                    context.draw(Image(nsImage: frame.image), in: CGRect(origin: origin, size: drawSize))
+                    return
+                }
+
+                let cursor = arrowPath(at: point, scale: 0.92)
+                if normalized.theme == .pinkArrow {
+                    var shadowContext = context
+                    shadowContext.translateBy(x: 2, y: 2)
+                    shadowContext.fill(cursor, with: .color(.black.opacity(0.24)))
+                    context.stroke(cursor, with: .color(.white.opacity(0.96)), lineWidth: 4)
+                    context.fill(cursor, with: .color(.black.opacity(0.86)))
+                    context.stroke(cursor, with: .color(.white.opacity(0.55)), lineWidth: 1)
+                } else {
+                    context.fill(cursor, with: .color(color))
+                    context.stroke(cursor, with: .color(.white.opacity(0.92)), lineWidth: 1.5)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.black.opacity(0.22))
+        )
+    }
+
+    private func arrowPath(at point: CGPoint, scale s: CGFloat) -> Path {
         var path = Path()
         path.move(to: point)
-        path.addLine(to: CGPoint(x: point.x, y: point.y + 7 * unit))
-        path.addLine(to: CGPoint(x: point.x + unit, y: point.y + 7 * unit))
-        path.addLine(to: CGPoint(x: point.x + unit, y: point.y + 5 * unit))
-        path.addLine(to: CGPoint(x: point.x + 2 * unit, y: point.y + 5 * unit))
-        path.addLine(to: CGPoint(x: point.x + 2 * unit, y: point.y + 6 * unit))
-        path.addLine(to: CGPoint(x: point.x + 3 * unit, y: point.y + 6 * unit))
-        path.addLine(to: CGPoint(x: point.x + 3 * unit, y: point.y + 4 * unit))
-        path.addLine(to: CGPoint(x: point.x + 5 * unit, y: point.y + 4 * unit))
+        path.addLine(to: CGPoint(x: point.x + 10 * s, y: point.y + 34 * s))
+        path.addLine(to: CGPoint(x: point.x + 28 * s, y: point.y + 18 * s))
         path.closeSubpath()
         return path
     }
 
-    private func glovePath(at point: CGPoint, scale s: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: point)
-        path.addCurve(to: CGPoint(x: point.x + 8 * s, y: point.y + 28 * s), control1: CGPoint(x: point.x + 2 * s, y: point.y + 9 * s), control2: CGPoint(x: point.x + 4 * s, y: point.y + 19 * s))
-        path.addCurve(to: CGPoint(x: point.x + 18 * s, y: point.y + 21 * s), control1: CGPoint(x: point.x + 12 * s, y: point.y + 30 * s), control2: CGPoint(x: point.x + 18 * s, y: point.y + 28 * s))
-        path.addCurve(to: CGPoint(x: point.x + 30 * s, y: point.y + 10 * s), control1: CGPoint(x: point.x + 24 * s, y: point.y + 21 * s), control2: CGPoint(x: point.x + 30 * s, y: point.y + 17 * s))
-        path.addCurve(to: CGPoint(x: point.x + 14 * s, y: point.y + 2 * s), control1: CGPoint(x: point.x + 29 * s, y: point.y + 1 * s), control2: CGPoint(x: point.x + 20 * s, y: point.y - 2 * s))
-        path.closeSubpath()
-        return path
-    }
-
-    private func rocketPath(at point: CGPoint, scale s: CGFloat) -> Path {
-        var path = Path()
-        path.move(to: point)
-        path.addLine(to: CGPoint(x: point.x + 13 * s, y: point.y + 38 * s))
-        path.addLine(to: CGPoint(x: point.x + 22 * s, y: point.y + 22 * s))
-        path.addLine(to: CGPoint(x: point.x + 34 * s, y: point.y + 18 * s))
-        path.addLine(to: CGPoint(x: point.x + 22 * s, y: point.y + 12 * s))
-        path.addLine(to: CGPoint(x: point.x + 17 * s, y: point.y + 2 * s))
-        path.closeSubpath()
-        return path
-    }
 }
 
 private extension CGRect {

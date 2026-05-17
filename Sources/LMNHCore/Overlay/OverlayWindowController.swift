@@ -136,11 +136,18 @@ private final class VirtualCursorCanvasView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         setAccessibilityElement(false)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(cursorAppearanceDidChange(_:)),
+            name: VirtualCursorAppearance.didChangeNotification,
+            object: nil
+        )
     }
 
     deinit {
         MainActor.assumeIsolated {
             displayTimer?.invalidate()
+            DistributedNotificationCenter.default().removeObserver(self)
         }
     }
 
@@ -202,236 +209,45 @@ private final class VirtualCursorCanvasView: NSView {
     }
 
     private func draw(_ animatedCursor: AnimatedVirtualCursor) {
-        let cursor = animatedCursor.cursor
+        let now = Date()
         let color = NSColor(cursorAppearance.normalized)
-        if let frame = cursor.target.frame {
-            drawFrame(frame, color: color, state: cursor.state)
-        }
 
-        if cursor.state == .dragging, let path = cursor.target.path {
-            drawDragPath(path, color: color)
-        }
-
-        guard let point = animatedCursor.presentationPoint(at: Date()) else {
+        guard let point = animatedCursor.presentationPoint(at: now) else {
             return
         }
 
         let localPoint = localPoint(forScreenPoint: point)
-        drawJourney(for: animatedCursor, color: color)
-
-        switch cursor.state {
-        case .observing:
-            drawObserving(at: localPoint, color: color)
-        case .aiming:
-            drawAiming(at: localPoint, color: color)
-        case .pressing:
-            drawPressing(at: localPoint, color: color)
-        case .typing:
-            drawTyping(at: localPoint, color: color)
-        case .scrolling:
-            drawScrolling(at: localPoint, color: color)
-        case .dragging:
-            drawDraggingEndpoint(at: localPoint, color: color)
-        case .blocked:
-            drawBlocked(at: localPoint)
-        case .handoff:
-            drawHandoff(at: localPoint)
-        }
-
-        if cursorAppearance.normalized.showLabels {
-            drawLabel(for: cursor, at: localPoint, color: color)
-        }
+        drawCursorArrow(at: localPoint, color: color, rotation: motionRotation(for: animatedCursor, at: now))
     }
 
-    private func drawJourney(for animatedCursor: AnimatedVirtualCursor, color: NSColor) {
-        guard cursorAppearance.normalized.showPath,
-              let start = animatedCursor.startPoint,
-              let end = animatedCursor.endPoint,
-              start.distance(to: end) > 2 else {
-            return
-        }
-
-        let localStart = localPoint(forScreenPoint: start)
-        let localEnd = localPoint(forScreenPoint: end)
-
-        color.withAlphaComponent(0.18).setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 2 * appearanceScale
-        path.lineCapStyle = .round
-        path.setLineDash([5, 7], count: 2, phase: 0)
-        path.move(to: localStart)
-        path.curve(
-            to: localEnd,
-            controlPoint1: CGPoint(x: localStart.x, y: (localStart.y + localEnd.y) / 2),
-            controlPoint2: CGPoint(x: localEnd.x, y: (localStart.y + localEnd.y) / 2)
-        )
-        path.stroke()
-
-        color.withAlphaComponent(0.35).setStroke()
-        NSBezierPath(ovalIn: CGRect(center: localStart, radius: 5 * appearanceScale)).stroke()
-
-        color.withAlphaComponent(0.7).setStroke()
-        let destination = NSBezierPath(ovalIn: CGRect(center: localEnd, radius: 10 * appearanceScale))
-        destination.lineWidth = 2 * appearanceScale
-        destination.stroke()
-    }
-
-    private func drawFrame(
-        _ frame: VirtualCursorFrame,
-        color: NSColor,
-        state: VirtualCursorState
-    ) {
-        let rect = localRect(forScreenRect: CGRect(
-            x: CGFloat(frame.x),
-            y: CGFloat(frame.y),
-            width: CGFloat(frame.width),
-            height: CGFloat(frame.height)
-        )).insetBy(dx: -4 * appearanceScale, dy: -4 * appearanceScale)
-
-        color.withAlphaComponent(state == .observing ? 0.4 : 0.65).setStroke()
-        let path = NSBezierPath(roundedRect: rect, xRadius: 8 * appearanceScale, yRadius: 8 * appearanceScale)
-        path.lineWidth = state == .blocked ? 3 : 2
-        path.setLineDash([6, 5], count: 2, phase: 0)
-        path.stroke()
-    }
-
-    private func drawObserving(at point: CGPoint, color: NSColor) {
-        color.withAlphaComponent(0.14).setFill()
-        NSBezierPath(ovalIn: CGRect(center: point, radius: 22)).fill()
-        color.withAlphaComponent(0.8).setStroke()
-        let ring = NSBezierPath(ovalIn: CGRect(center: point, radius: 14))
-        ring.lineWidth = 2
-        ring.stroke()
-    }
-
-    private func drawAiming(at point: CGPoint, color: NSColor) {
-        drawCursorArrow(at: point, color: color)
-        color.withAlphaComponent(0.95).setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 2
-        path.move(to: CGPoint(x: point.x - 18, y: point.y))
-        path.line(to: CGPoint(x: point.x - 6, y: point.y))
-        path.move(to: CGPoint(x: point.x + 6, y: point.y))
-        path.line(to: CGPoint(x: point.x + 18, y: point.y))
-        path.move(to: CGPoint(x: point.x, y: point.y - 18))
-        path.line(to: CGPoint(x: point.x, y: point.y - 6))
-        path.move(to: CGPoint(x: point.x, y: point.y + 6))
-        path.line(to: CGPoint(x: point.x, y: point.y + 18))
-        path.stroke()
-        NSBezierPath(ovalIn: CGRect(center: point, radius: 4)).fill(with: color)
-    }
-
-    private func drawPressing(at point: CGPoint, color: NSColor) {
-        drawCursorArrow(at: point, color: color)
-        color.withAlphaComponent(0.22).setFill()
-        NSBezierPath(ovalIn: CGRect(center: point, radius: 24)).fill()
-        color.withAlphaComponent(0.95).setStroke()
-        let ripple = NSBezierPath(ovalIn: CGRect(center: point, radius: 17))
-        ripple.lineWidth = 3
-        ripple.stroke()
-        NSBezierPath(ovalIn: CGRect(center: point, radius: 5)).fill(with: color)
-    }
-
-    private func drawTyping(at point: CGPoint, color: NSColor) {
-        drawCursorArrow(at: point.offsetBy(dx: -10, dy: 0), color: color)
-        color.withAlphaComponent(0.95).setStroke()
-        let caret = NSBezierPath()
-        caret.lineWidth = 3
-        caret.move(to: CGPoint(x: point.x, y: point.y - 16))
-        caret.line(to: CGPoint(x: point.x, y: point.y + 16))
-        caret.move(to: CGPoint(x: point.x - 5, y: point.y + 16))
-        caret.line(to: CGPoint(x: point.x + 5, y: point.y + 16))
-        caret.move(to: CGPoint(x: point.x - 5, y: point.y - 16))
-        caret.line(to: CGPoint(x: point.x + 5, y: point.y - 16))
-        caret.stroke()
-    }
-
-    private func drawScrolling(at point: CGPoint, color: NSColor) {
-        color.withAlphaComponent(0.75).setStroke()
-        let path = NSBezierPath()
-        path.lineWidth = 3
-        path.move(to: CGPoint(x: point.x, y: point.y - 28))
-        path.line(to: CGPoint(x: point.x, y: point.y + 28))
-        path.move(to: CGPoint(x: point.x - 8, y: point.y + 18))
-        path.line(to: CGPoint(x: point.x, y: point.y + 28))
-        path.line(to: CGPoint(x: point.x + 8, y: point.y + 18))
-        path.move(to: CGPoint(x: point.x - 8, y: point.y - 18))
-        path.line(to: CGPoint(x: point.x, y: point.y - 28))
-        path.line(to: CGPoint(x: point.x + 8, y: point.y - 18))
-        path.stroke()
-    }
-
-    private func drawDragPath(_ cursorPath: VirtualCursorPath, color: NSColor) {
-        guard let first = cursorPath.points.first else {
-            return
-        }
-
-        let path = NSBezierPath()
-        path.lineWidth = 4
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        path.move(to: localPoint(forScreenPoint: first.cgPoint))
-
-        for point in cursorPath.points.dropFirst() {
-            path.line(to: localPoint(forScreenPoint: point.cgPoint))
-        }
-
-        color.withAlphaComponent(0.72).setStroke()
-        path.stroke()
-    }
-
-    private func drawDraggingEndpoint(at point: CGPoint, color: NSColor) {
-        drawCursorArrow(at: point, color: color)
-        color.withAlphaComponent(0.95).setFill()
-        NSBezierPath(ovalIn: CGRect(center: point, radius: 7)).fill()
-    }
-
-    private func drawCursorArrow(at point: CGPoint, color: NSColor) {
+    private func drawCursorArrow(at point: CGPoint, color: NSColor, rotation: CGFloat = 0) {
         let appearance = cursorAppearance.normalized
         VirtualCursorThemePainter.drawCursor(
             theme: appearance.theme,
             at: point,
             scale: appearanceScale,
             tint: color,
-            alpha: CGFloat(appearance.alpha)
+            alpha: CGFloat(appearance.alpha),
+            rotation: rotation
         )
     }
 
-    private func drawBlocked(at point: CGPoint) {
-        NSColor.systemRed.withAlphaComponent(0.95).setStroke()
-        let stop = NSBezierPath(ovalIn: CGRect(center: point, radius: 17))
-        stop.lineWidth = 4
-        stop.stroke()
-
-        let slash = NSBezierPath()
-        slash.lineWidth = 4
-        slash.move(to: CGPoint(x: point.x - 11, y: point.y - 11))
-        slash.line(to: CGPoint(x: point.x + 11, y: point.y + 11))
-        slash.stroke()
+    private func motionRotation(for animatedCursor: AnimatedVirtualCursor, at date: Date) -> CGFloat {
+        VirtualCursorMotion.rotation(
+            start: animatedCursor.startPoint.map(localPoint(forScreenPoint:)),
+            end: animatedCursor.endPoint.map(localPoint(forScreenPoint:)),
+            at: date,
+            startedAt: animatedCursor.startedAt,
+            duration: animatedCursor.duration
+        )
     }
 
-    private func drawHandoff(at point: CGPoint) {
-        NSColor.systemOrange.withAlphaComponent(0.95).setFill()
-        let diamond = NSBezierPath()
-        diamond.move(to: CGPoint(x: point.x, y: point.y + 18))
-        diamond.line(to: CGPoint(x: point.x + 18, y: point.y))
-        diamond.line(to: CGPoint(x: point.x, y: point.y - 18))
-        diamond.line(to: CGPoint(x: point.x - 18, y: point.y))
-        diamond.close()
-        diamond.fill()
-    }
-
-    private func drawLabel(for cursor: VirtualCursorRecord, at point: CGPoint, color: NSColor) {
-        guard let label = cursor.taskLabel ?? cursor.lastToolCallID else {
-            return
+    @objc private func cursorAppearanceDidChange(_ notification: Notification) {
+        cursorAppearance = VirtualCursorAppearance.load()
+        needsDisplay = true
+        if !animatedCursors.isEmpty {
+            startDisplayTimerIfNeeded()
         }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: color.withAlphaComponent(0.95)
-        ]
-        let text = NSAttributedString(string: label, attributes: attributes)
-        text.draw(at: CGPoint(x: point.x + 14, y: point.y + 14))
     }
 
     private var appearanceScale: CGFloat {
@@ -444,6 +260,18 @@ private final class VirtualCursorCanvasView: NSView {
 
     private func localRect(forScreenRect rect: CGRect) -> CGRect {
         VirtualCursorCoordinateConverter.localRect(fromGlobalTopLeft: rect, inScreenFrame: screen.frame)
+    }
+}
+
+private extension VirtualCursorRecord {
+    var displayLabel: String? {
+        guard let label = taskLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !label.isEmpty,
+              !label.hasPrefix("act_"),
+              !label.hasPrefix("call_") else {
+            return nil
+        }
+        return label
     }
 }
 
