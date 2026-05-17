@@ -89,6 +89,10 @@ final class ControlPanelModel: ObservableObject {
         saveAppearance()
     }
 
+    func requestAccessibilityPermission() {
+        permissionStatus = permissionReader.current(promptForAccessibility: true)
+    }
+
     func applyTheme(_ theme: VirtualCursorTheme) {
         let previous = appearance.normalized
         var next = theme.defaultAppearance
@@ -179,9 +183,14 @@ final class ControlPanelModel: ObservableObject {
     }
 
     func installCodexPlugin() {
+        guard let codexCommand = Self.resolvedExecutable(named: "codex") else {
+            installMessage = "Failed to install Codex MCP plugin: codex CLI was not found in PATH, ~/.local/bin, Homebrew, fnm, or nvm installs."
+            return
+        }
+
         let command = """
-        codex mcp remove look-mum-no-hands-dev >/dev/null 2>&1 || true
-        codex mcp add look-mum-no-hands-dev -- \(Self.shellQuote(Self.mcpBinaryURL.path))
+        \(Self.shellQuote(codexCommand)) mcp remove look-mum-no-hands-dev >/dev/null 2>&1 || true
+        \(Self.shellQuote(codexCommand)) mcp add look-mum-no-hands-dev -- \(Self.shellQuote(Self.mcpBinaryURL.path))
         """
         let result = Self.runShell(command)
         if result.status == 0 {
@@ -192,6 +201,7 @@ final class ControlPanelModel: ObservableObject {
     }
 
     func installClaudePlugin() {
+        let claudeCommand = Self.resolvedExecutable(named: "claude")
         let binaryPath = Self.mcpBinaryURL.path
         let skillSource = LMNHPaths.projectRoot
             .appending(path: "plugins", directoryHint: .isDirectory)
@@ -205,15 +215,19 @@ final class ControlPanelModel: ObservableObject {
 
         var messages: [String] = []
 
-        let command = """
-        claude mcp remove look-mum-no-hands-dev >/dev/null 2>&1 || true
-        claude mcp add --scope user look-mum-no-hands-dev -- \(Self.shellQuote(binaryPath))
-        """
-        let result = Self.runShell(command)
-        if result.status == 0 {
-            messages.append("Registered Claude MCP server: look-mum-no-hands-dev")
+        if let claudeCommand {
+            let command = """
+            \(Self.shellQuote(claudeCommand)) mcp remove look-mum-no-hands-dev >/dev/null 2>&1 || true
+            \(Self.shellQuote(claudeCommand)) mcp add --scope user look-mum-no-hands-dev -- \(Self.shellQuote(binaryPath))
+            """
+            let result = Self.runShell(command)
+            if result.status == 0 {
+                messages.append("Registered Claude MCP server: look-mum-no-hands-dev")
+            } else {
+                messages.append("Failed to register Claude MCP server: \(result.output)")
+            }
         } else {
-            messages.append("Failed to register Claude MCP server: \(result.output)")
+            messages.append("Failed to register Claude MCP server: claude CLI was not found in PATH, ~/.local/bin, Homebrew, fnm, or nvm installs.")
         }
 
         do {
@@ -293,12 +307,76 @@ final class ControlPanelModel: ObservableObject {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private static func resolvedExecutable(named executableName: String) -> String? {
+        let fileManager = FileManager.default
+        for directory in executableSearchDirectories() {
+            let candidate = directory.appending(path: executableName).path
+            if fileManager.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func executableSearchDirectories() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var directories: [URL] = []
+
+        if let path = ProcessInfo.processInfo.environment["PATH"] {
+            directories.append(contentsOf: path.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
+        }
+
+        directories.append(contentsOf: [
+            home.appending(path: ".local/bin", directoryHint: .isDirectory),
+            URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true),
+            URL(fileURLWithPath: "/usr/local/bin", isDirectory: true),
+            URL(fileURLWithPath: "/usr/bin", isDirectory: true),
+            URL(fileURLWithPath: "/bin", isDirectory: true)
+        ])
+
+        directories.append(contentsOf: versionedNodeBinDirectories(in: home.appending(path: ".local/share/fnm/node-versions", directoryHint: .isDirectory)) {
+            $0.appending(path: "installation/bin", directoryHint: .isDirectory)
+        })
+        directories.append(contentsOf: versionedNodeBinDirectories(in: home.appending(path: ".nvm/versions/node", directoryHint: .isDirectory)) { $0 })
+
+        var seen: Set<String> = []
+        return directories.filter { directory in
+            let path = directory.path
+            guard !seen.contains(path) else {
+                return false
+            }
+            seen.insert(path)
+            return true
+        }
+    }
+
+    private static func versionedNodeBinDirectories(
+        in root: URL,
+        transform: (URL) -> URL
+    ) -> [URL] {
+        guard let versionDirectories = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return versionDirectories
+            .filter { url in
+                (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
+            .map(transform)
+    }
+
     private static func runShell(_ command: String) -> (status: Int32, output: String) {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
         process.currentDirectoryURL = LMNHPaths.projectRoot
+        process.environment = shellEnvironment()
         process.standardOutput = pipe
         process.standardError = pipe
 
@@ -310,5 +388,16 @@ final class ControlPanelModel: ObservableObject {
         } catch {
             return (1, error.localizedDescription)
         }
+    }
+
+    private static func shellEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let searchPath = executableSearchDirectories().map(\.path).joined(separator: ":")
+        if let existingPath = environment["PATH"], !existingPath.isEmpty {
+            environment["PATH"] = "\(searchPath):\(existingPath)"
+        } else {
+            environment["PATH"] = searchPath
+        }
+        return environment
     }
 }

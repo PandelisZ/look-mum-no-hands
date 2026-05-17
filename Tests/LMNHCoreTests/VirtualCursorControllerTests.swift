@@ -50,6 +50,27 @@ final class VirtualCursorControllerTests: XCTestCase {
         XCTAssertEqual(renderer.renderedCursorIDs, [["cursor_1"], []])
     }
 
+    @MainActor
+    func testCursorExpiresAfterInactivityTimeout() {
+        let renderer = SpyCursorRenderer()
+        let controller = VirtualCursorController(renderer: renderer)
+
+        controller.setCursor(
+            cursorID: "cursor_1",
+            sessionID: "session_abc",
+            state: .observing,
+            target: VirtualCursorTarget(point: VirtualCursorPoint(x: 100, y: 200))
+        )
+
+        let updatedAt = controller.listCursors(includeHidden: true)[0].updatedAt
+        controller.expireInactiveCursors(now: updatedAt.addingTimeInterval(VirtualCursorController.inactivityTimeout + 0.01))
+
+        XCTAssertTrue(controller.listCursors().isEmpty)
+        XCTAssertEqual(controller.listCursors(includeHidden: true).map(\.cursorID), ["cursor_1"])
+        XCTAssertEqual(controller.listCursors(includeHidden: true)[0].visible, false)
+        XCTAssertEqual(renderer.renderedCursorIDs, [["cursor_1"], []])
+    }
+
     func testAllPlannedStatesAreRepresented() {
         XCTAssertEqual(
             Set(VirtualCursorState.allCases),
@@ -73,6 +94,35 @@ final class VirtualCursorControllerTests: XCTestCase {
         }
     }
 
+    func testClickPulseScalesCursorDownAndRestoresIt() {
+        let startedAt = Date(timeIntervalSinceReferenceDate: 100)
+
+        XCTAssertEqual(VirtualCursorMotion.clickScale(startedAt: nil, at: startedAt), 1)
+        XCTAssertEqual(VirtualCursorMotion.clickScale(startedAt: startedAt, at: startedAt), 1)
+        XCTAssertEqual(
+            VirtualCursorMotion.clickScale(
+                startedAt: startedAt,
+                at: startedAt.addingTimeInterval(VirtualCursorMotion.clickPulseDuration * 0.35)
+            ),
+            0.9,
+            accuracy: 0.001
+        )
+        XCTAssertLessThan(
+            VirtualCursorMotion.clickScale(
+                startedAt: startedAt,
+                at: startedAt.addingTimeInterval(VirtualCursorMotion.clickPulseDuration * 0.65)
+            ),
+            1
+        )
+        XCTAssertEqual(
+            VirtualCursorMotion.clickScale(
+                startedAt: startedAt,
+                at: startedAt.addingTimeInterval(VirtualCursorMotion.clickPulseDuration + 0.01)
+            ),
+            1
+        )
+    }
+
     @MainActor
     func testBitmapCursorThemesLoadBundledFrames() {
         let themes: [VirtualCursorTheme] = [
@@ -81,7 +131,10 @@ final class VirtualCursorControllerTests: XCTestCase {
             .tardis,
             .crosshairGreen,
             .gunAdvanced,
-            .shiningSword
+            .shiningSword,
+            .runescapeDragonDagger,
+            .sportsArchery,
+            .diamondTools
         ]
 
         for theme in themes {
@@ -158,6 +211,27 @@ final class VirtualCursorControllerTests: XCTestCase {
 
         XCTAssertTrue(VirtualCursorCoordinateConverter.screenFrame(screen, containsGlobalTopLeft: CGPoint(x: 538, y: 808)))
         XCTAssertFalse(VirtualCursorCoordinateConverter.screenFrame(screen, containsGlobalTopLeft: CGPoint(x: 1900, y: 808)))
+    }
+
+    func testVirtualCursorTargetOffsetsWhenWindowMoves() {
+        let target = VirtualCursorTarget(
+            appBundleID: "com.apple.calculator",
+            processIdentifier: 123,
+            windowFrame: VirtualCursorFrame(x: 100, y: 200, width: 300, height: 400),
+            elementID: "el_1",
+            frame: VirtualCursorFrame(x: 140, y: 260, width: 40, height: 20),
+            point: VirtualCursorPoint(x: 160, y: 270)
+        )
+
+        let moved = target.offsetBy(
+            dx: 25,
+            dy: -10,
+            liveWindowFrame: LMNHRect(x: 125, y: 190, width: 300, height: 400)
+        )
+
+        XCTAssertEqual(moved.windowFrame, VirtualCursorFrame(x: 125, y: 190, width: 300, height: 400))
+        XCTAssertEqual(moved.frame, VirtualCursorFrame(x: 165, y: 250, width: 40, height: 20))
+        XCTAssertEqual(moved.point, VirtualCursorPoint(x: 185, y: 260))
     }
 }
 

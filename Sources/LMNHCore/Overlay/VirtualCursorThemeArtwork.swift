@@ -126,6 +126,28 @@ private struct BitmapCursorMetadata {
                 frameCount: 8,
                 frameDuration: 1.5333333333333
             )
+        case .runescapeDragonDagger:
+            self.init(
+                imageName: "runescape-dragon-dagger",
+                hotspot: CGPoint(x: 0, y: 0),
+                baseSize: CGSize(width: 32, height: 32),
+                frameCount: 21,
+                frameDuration: 3.5
+            )
+        case .sportsArchery:
+            self.init(
+                imageName: "sports-archery",
+                hotspot: CGPoint(x: 0, y: 0),
+                baseSize: CGSize(width: 32, height: 32),
+                frameCount: 25,
+                frameDuration: 1.9
+            )
+        case .diamondTools:
+            self.init(
+                imageName: "diamond-tools",
+                hotspot: CGPoint(x: 2, y: 2),
+                baseSize: CGSize(width: 32, height: 32)
+            )
         case .pinkArrow:
             return nil
         }

@@ -108,6 +108,109 @@ public struct TextEntryResult: Codable, Sendable {
     }
 }
 
+public struct CompactPoint: Codable, Sendable, Equatable {
+    public var x: Double
+    public var y: Double
+
+    public init(_ point: LMNHPoint) {
+        self.x = point.x
+        self.y = point.y
+    }
+}
+
+public struct CompactActionResult: Codable, Sendable {
+    public var id: String
+    public var status: String
+    public var layer: String
+    public var focus: String
+    public var realMouseMoved: Bool
+    public var target: String?
+    public var point: CompactPoint?
+    public var cursor: String?
+    public var warning: String?
+    public var error: String?
+    public var text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case layer
+        case focus
+        case realMouseMoved = "real_mouse_moved"
+        case target
+        case point
+        case cursor
+        case warning
+        case error
+        case text
+    }
+
+    public init(action: MacOSActionResult, cursor: VirtualCursorRecord? = nil, text: String? = nil) {
+        self.id = action.actionId
+        self.status = action.status.rawValue
+        self.layer = action.executionLayer.rawValue
+        self.focus = action.focusPolicy.rawValue
+        self.realMouseMoved = action.realMouseMoved
+        self.target = action.elementId ?? action.targetBundleIdentifier
+        self.point = action.point.map(CompactPoint.init)
+        self.cursor = cursor.map { "\($0.state.rawValue)@\($0.cursorID)" }
+        self.warning = action.warnings.first
+        self.error = action.error.map { "\($0.name)(\($0.code))" }
+        self.text = text ?? Self.defaultText(action: action)
+    }
+
+    private static func defaultText(action: MacOSActionResult) -> String {
+        var parts = [
+            "status=\(action.status.rawValue)",
+            "layer=\(action.executionLayer.rawValue)",
+            "focus=\(action.focusPolicy.rawValue)",
+            "mouse_moved=\(action.realMouseMoved)"
+        ]
+        if let elementId = action.elementId {
+            parts.append("target=\(elementId)")
+        } else if let point = action.point {
+            parts.append("point=\(Int(point.x)),\(Int(point.y))")
+        }
+        if let warning = action.warnings.first {
+            parts.append("warning=\(warning)")
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
+public struct CompactTextEntryResult: Codable, Sendable {
+    public var action: CompactActionResult
+    public var mode: String
+    public var method: String
+    public var focusless: Bool
+    public var insertedLength: Int
+    public var resultingLength: Int?
+    public var fallbackPolicy: String
+    public var failureReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case action
+        case mode
+        case method
+        case focusless
+        case insertedLength = "inserted_length"
+        case resultingLength = "resulting_length"
+        case fallbackPolicy = "fallback_policy"
+        case failureReason = "failure_reason"
+    }
+
+    public init(action: MacOSActionResult, diagnostics: TextEntryDiagnostics, cursor: VirtualCursorRecord?) {
+        self.action = CompactActionResult(action: action, cursor: cursor)
+        self.mode = diagnostics.effectiveMode ?? diagnostics.requestedMode
+        self.method = diagnostics.method
+        self.focusless = diagnostics.focusless
+        self.insertedLength = diagnostics.insertedLength
+        self.resultingLength = diagnostics.resultingLength
+        self.fallbackPolicy = diagnostics.fallbackPolicy
+        self.failureReason = diagnostics.failureReason
+    }
+}
+
 public struct MacOSActionResult: Codable, Sendable {
     public var actionId: String
     public var requested: String

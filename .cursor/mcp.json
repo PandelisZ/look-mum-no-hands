@@ -1,10 +1,12 @@
 {
-  "mcpServers": {
-    "look-mum-no-hands-dev": {
-      "command": "/Users/pz/w/look-mum-no-hands/.build/debug/lmnh-mcp",
-      "args": [],
-      "env": {
-        "LMNH_LOG_LEVEL": "debug"
+  "mcpServers" : {
+    "look-mum-no-hands-dev" : {
+      "args" : [
+
+      ],
+      "command" : "\/Users\/pz\/w\/look-mum-no-hands\/.build\/debug\/lmnh-mcp",
+      "env" : {
+        "LMNH_LOG_LEVEL" : "debug"
       }
     }
   }

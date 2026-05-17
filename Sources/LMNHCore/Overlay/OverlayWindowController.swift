@@ -4,6 +4,7 @@ import AppKit
 public final class AppKitVirtualCursorRenderer: VirtualCursorRendering {
     private var windows: [ObjectIdentifier: VirtualCursorOverlayPanel]
     private var views: [ObjectIdentifier: VirtualCursorCanvasView]
+    private let windowInventory = WindowInventory()
 
     public static func makeIfAvailable() -> AppKitVirtualCursorRenderer? {
         guard ProcessInfo.processInfo.environment["LMNH_OVERLAY_RENDERER"] != "headless" else {
@@ -31,13 +32,17 @@ public final class AppKitVirtualCursorRenderer: VirtualCursorRendering {
         for screen in NSScreen.screens {
             let id = ObjectIdentifier(screen)
             views[id]?.cursors = cursors.filter { cursor in
-                guard let point = cursor.target.displayPoint else {
+                let target = resolveLiveTarget(cursor.target)
+                guard let point = target.displayPoint else {
                     return cursor.target.path?.points.contains {
                         VirtualCursorCoordinateConverter.screenFrame(screen.frame, containsGlobalTopLeft: $0.cgPoint)
                     } ?? false
                 }
 
                 return VirtualCursorCoordinateConverter.screenFrame(screen.frame, containsGlobalTopLeft: point.cgPoint)
+            }
+            views[id]?.targetResolver = { [weak self] target in
+                self?.resolveLiveTarget(target) ?? target
             }
         }
     }
@@ -81,6 +86,51 @@ public final class AppKitVirtualCursorRenderer: VirtualCursorRendering {
             window.orderFrontRegardless()
         }
     }
+
+    private func resolveLiveTarget(_ target: VirtualCursorTarget) -> VirtualCursorTarget {
+        guard let previousWindowFrame = target.windowFrame,
+              let liveWindow = liveWindow(for: target),
+              let liveFrame = liveWindow.bounds else {
+            return target
+        }
+
+        let dx = liveFrame.x - previousWindowFrame.x
+        let dy = liveFrame.y - previousWindowFrame.y
+        guard dx != 0 || dy != 0 else {
+            return target
+        }
+
+        return target.offsetBy(dx: dx, dy: dy, liveWindowFrame: liveFrame)
+    }
+
+    private func liveWindow(for target: VirtualCursorTarget) -> MacOSWindowInfo? {
+        let windows = windowInventory.listWindows()
+        if let processIdentifier = target.processIdentifier {
+            return windows
+                .filter { $0.ownerPID == processIdentifier && $0.layer == 0 && $0.isOnscreen && $0.bounds?.isUsableFrame == true }
+                .max { left, right in
+                    overlapArea(left.bounds, target.windowFrame) < overlapArea(right.bounds, target.windowFrame)
+                }
+        }
+
+        guard let appBundleID = target.appBundleID else {
+            return nil
+        }
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == appBundleID }
+        let pids = Set(apps.map(\.processIdentifier))
+        return windows
+            .filter { pids.contains($0.ownerPID) && $0.layer == 0 && $0.isOnscreen && $0.bounds?.isUsableFrame == true }
+            .max { left, right in
+                overlapArea(left.bounds, target.windowFrame) < overlapArea(right.bounds, target.windowFrame)
+            }
+    }
+
+    private func overlapArea(_ lhs: LMNHRect?, _ rhs: VirtualCursorFrame?) -> Double {
+        guard let lhs, let rhs else { return 0 }
+        let xOverlap = max(0, min(lhs.x + lhs.width, rhs.x + rhs.width) - max(lhs.x, rhs.x))
+        let yOverlap = max(0, min(lhs.y + lhs.height, rhs.y + rhs.height) - max(lhs.y, rhs.y))
+        return xOverlap * yOverlap
+    }
 }
 
 @MainActor
@@ -121,6 +171,7 @@ private final class VirtualCursorCanvasView: NSView {
     private var animatedCursors: [String: AnimatedVirtualCursor] = [:]
     private var displayTimer: Timer?
     private var cursorAppearance = VirtualCursorAppearance.load()
+    var targetResolver: ((VirtualCursorTarget) -> VirtualCursorTarget)?
 
     var cursors: [VirtualCursorRecord] = [] {
         didSet {
@@ -173,12 +224,15 @@ private final class VirtualCursorCanvasView: NSView {
         animatedCursors = animatedCursors.filter { incoming[$0.key] != nil }
 
         for cursor in cursors {
-            let endPoint = cursor.target.displayPoint?.cgPoint
+            let resolvedTarget = targetResolver?(cursor.target) ?? cursor.target
+            var resolvedCursor = cursor
+            resolvedCursor.target = resolvedTarget
+            let endPoint = resolvedTarget.displayPoint?.cgPoint
             let previous = animatedCursors[cursor.cursorID]
             let currentPoint = previous?.presentationPoint(at: now) ?? previous?.endPoint ?? endPoint
-            let clickPulseStartedAt = clickPulseStart(for: cursor, previous: previous, now: now)
+            let clickPulseStartedAt = clickPulseStart(for: resolvedCursor, previous: previous, now: now)
             animatedCursors[cursor.cursorID] = AnimatedVirtualCursor(
-                cursor: cursor,
+                cursor: resolvedCursor,
                 startPoint: currentPoint,
                 endPoint: endPoint,
                 startedAt: now,
@@ -214,8 +268,10 @@ private final class VirtualCursorCanvasView: NSView {
     private func draw(_ animatedCursor: AnimatedVirtualCursor) {
         let now = Date()
         let color = NSColor(cursorAppearance.normalized)
+        let liveTarget = targetResolver?(animatedCursor.cursor.target) ?? animatedCursor.cursor.target
+        let liveEndPoint = liveTarget.displayPoint?.cgPoint
 
-        guard let point = animatedCursor.presentationPoint(at: now) else {
+        guard let point = animatedCursor.presentationPoint(at: now, liveEndPoint: liveEndPoint) else {
             return
         }
 
@@ -223,7 +279,7 @@ private final class VirtualCursorCanvasView: NSView {
         drawCursorArrow(
             at: localPoint,
             color: color,
-            rotation: motionRotation(for: animatedCursor, at: now),
+            rotation: motionRotation(for: animatedCursor, liveEndPoint: liveEndPoint, at: now),
             scaleMultiplier: VirtualCursorMotion.clickScale(startedAt: animatedCursor.clickPulseStartedAt, at: now)
         )
     }
@@ -245,10 +301,14 @@ private final class VirtualCursorCanvasView: NSView {
         )
     }
 
-    private func motionRotation(for animatedCursor: AnimatedVirtualCursor, at date: Date) -> CGFloat {
+    private func motionRotation(
+        for animatedCursor: AnimatedVirtualCursor,
+        liveEndPoint: CGPoint?,
+        at date: Date
+    ) -> CGFloat {
         VirtualCursorMotion.rotation(
             start: animatedCursor.startPoint.map(localPoint(forScreenPoint:)),
-            end: animatedCursor.endPoint.map(localPoint(forScreenPoint:)),
+            end: (liveEndPoint ?? animatedCursor.endPoint).map(localPoint(forScreenPoint:)),
             at: date,
             startedAt: animatedCursor.startedAt,
             duration: animatedCursor.duration
@@ -260,7 +320,7 @@ private final class VirtualCursorCanvasView: NSView {
         previous: AnimatedVirtualCursor?,
         now: Date
     ) -> Date? {
-        if cursor.state == .pressing, previous?.cursor.state != .pressing {
+        if cursor.state == .pressing, previous?.cursor.updatedAt != cursor.updatedAt {
             return now
         }
 
@@ -297,34 +357,28 @@ private struct AnimatedVirtualCursor {
     var duration: Double
     var clickPulseStartedAt: Date?
 
-    func presentationPoint(at date: Date) -> CGPoint? {
-        guard let endPoint else {
+    func presentationPoint(at date: Date, liveEndPoint: CGPoint? = nil) -> CGPoint? {
+        let destination = liveEndPoint ?? endPoint
+        guard let destination else {
             return nil
         }
         guard let startPoint else {
-            return endPoint
+            return destination
         }
         guard duration > 0 else {
-            return endPoint
+            return destination
         }
 
         let progress = min(max(date.timeIntervalSince(startedAt) / duration, 0), 1)
         let eased = easeOutCubic(progress)
         return CGPoint(
-            x: startPoint.x + (endPoint.x - startPoint.x) * eased,
-            y: startPoint.y + (endPoint.y - startPoint.y) * eased
+            x: startPoint.x + (destination.x - startPoint.x) * eased,
+            y: startPoint.y + (destination.y - startPoint.y) * eased
         )
     }
 
     private func easeOutCubic(_ x: Double) -> Double {
         1 - pow(1 - x, 3)
-    }
-}
-
-private extension NSBezierPath {
-    func fill(with color: NSColor) {
-        color.setFill()
-        fill()
     }
 }
 

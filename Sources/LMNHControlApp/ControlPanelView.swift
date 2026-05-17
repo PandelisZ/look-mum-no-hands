@@ -71,11 +71,14 @@ struct ControlPanelView: View {
                 .font(.headline)
             PermissionRow(title: "Accessibility", state: model.permissionStatus.accessibility)
             PermissionRow(title: "Screen Recording", state: model.permissionStatus.screenCapture)
-            HStack {
-                Button("Accessibility Settings") { model.openAccessibilitySettings() }
-                Button("Screen Recording") { model.openScreenRecordingSettings() }
+            AdaptiveActionGroup {
+                fullTextButton("Request Accessibility") { model.requestAccessibilityPermission() }
+                fullTextButton("Accessibility Settings") { model.openAccessibilitySettings() }
+                fullTextButton("Screen Recording") { model.openScreenRecordingSettings() }
             }
-            .buttonStyle(.bordered)
+            Text("Bundle \(model.permissionStatus.bundleIdentifier ?? "unknown")")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
             Text("Settings \(LMNHPaths.stateDirectory.path)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -110,23 +113,22 @@ struct ControlPanelView: View {
                     .textSelection(.enabled)
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Start HTTP") { model.startMCPServer() }
+            AdaptiveActionGroup {
+                fullTextButton("Start HTTP") { model.startMCPServer() }
                     .disabled(model.isMCPServerRunning)
-                Button("Stop HTTP") { model.stopMCPServer() }
+                fullTextButton("Stop HTTP") { model.stopMCPServer() }
                     .disabled(!model.isMCPServerRunning)
-                Button("Copy URL") { model.copyMCPServerURL() }
+                fullTextButton("Copy URL") { model.copyMCPServerURL() }
             }
-            .buttonStyle(.bordered)
 
-            HStack {
-                Button("Install Cursor") { model.installCursorPlugin() }
-                Button("Install Codex") { model.installCodexPlugin() }
-                Button("Install Claude") { model.installClaudePlugin() }
+            AdaptiveActionGroup {
+                fullTextButton("Install Cursor") { model.installCursorPlugin() }
+                fullTextButton("Install Codex") { model.installCodexPlugin() }
+                fullTextButton("Install Claude") { model.installClaudePlugin() }
             }
-            .buttonStyle(.bordered)
 
             Button("Install All Plugins") { model.installAllPlugins() }
+                .fixedSize(horizontal: true, vertical: false)
                 .buttonStyle(.borderedProminent)
 
             if !model.installMessage.isEmpty {
@@ -300,6 +302,28 @@ struct ControlPanelView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(.white.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    private func fullTextButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private struct AdaptiveActionGroup<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                content()
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                content()
+            }
+        }
+        .buttonStyle(.bordered)
     }
 }
 

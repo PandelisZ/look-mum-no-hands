@@ -8,6 +8,9 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
     case crosshairGreen = "crosshair_green"
     case gunAdvanced = "gun_advanced"
     case shiningSword = "shining_sword"
+    case runescapeDragonDagger = "runescape_dragon_dagger"
+    case sportsArchery = "sports_archery"
+    case diamondTools = "diamond_tools"
 
     public var id: String { rawValue }
 
@@ -20,6 +23,9 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
         case .crosshairGreen: "Crosshair Green"
         case .gunAdvanced: "Gun Advanced"
         case .shiningSword: "Shining Sword"
+        case .runescapeDragonDagger: "RuneScape DDS"
+        case .sportsArchery: "Sports Archery"
+        case .diamondTools: "Diamond Tools"
         }
     }
 
@@ -27,7 +33,8 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .pinkArrow:
             true
-        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword:
+        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword,
+             .runescapeDragonDagger, .sportsArchery, .diamondTools:
             false
         }
     }
@@ -46,6 +53,12 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
             "Gun Advanced Cursors by The Sword of the Heart, CC BY, rw-designer.com"
         case .shiningSword:
             "Swords Cursors by Mr. Zidgel, CC BY, rw-designer.com"
+        case .runescapeDragonDagger:
+            "Runescape DDS With Animated Special+ More Cursors by Tylo222, CC BY, rw-designer.com"
+        case .sportsArchery:
+            "Sports Gear Cursors by Daniel W., CC BY, rw-designer.com"
+        case .diamondTools:
+            "Minecraft - Diamond Tools Cursors by Ultra Ninja, public domain, rw-designer.com"
         case .pinkArrow:
             nil
         }
@@ -55,7 +68,8 @@ public enum VirtualCursorTheme: String, Codable, CaseIterable, Identifiable, Sen
         switch self {
         case .pinkArrow:
             VirtualCursorAppearance(theme: self, red: 1.0, green: 0.18, blue: 0.62)
-        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword:
+        case .customCurser, .flameBlack, .tardis, .crosshairGreen, .gunAdvanced, .shiningSword,
+             .runescapeDragonDagger, .sportsArchery, .diamondTools:
             VirtualCursorAppearance(theme: self, red: 0.18, green: 0.54, blue: 1.0)
         }
     }

@@ -69,7 +69,9 @@ public struct VirtualCursorPath: Codable, Equatable, Sendable, Hashable {
 
 public struct VirtualCursorTarget: Codable, Equatable, Sendable, Hashable {
     public var appBundleID: String?
+    public var processIdentifier: Int32?
     public var windowID: String?
+    public var windowFrame: VirtualCursorFrame?
     public var elementID: String?
     public var frame: VirtualCursorFrame?
     public var point: VirtualCursorPoint?
@@ -77,14 +79,18 @@ public struct VirtualCursorTarget: Codable, Equatable, Sendable, Hashable {
 
     public init(
         appBundleID: String? = nil,
+        processIdentifier: Int32? = nil,
         windowID: String? = nil,
+        windowFrame: VirtualCursorFrame? = nil,
         elementID: String? = nil,
         frame: VirtualCursorFrame? = nil,
         point: VirtualCursorPoint? = nil,
         path: VirtualCursorPath? = nil
     ) {
         self.appBundleID = appBundleID
+        self.processIdentifier = processIdentifier
         self.windowID = windowID
+        self.windowFrame = windowFrame
         self.elementID = elementID
         self.frame = frame
         self.point = point
@@ -97,7 +103,9 @@ public struct VirtualCursorTarget: Codable, Equatable, Sendable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case appBundleID = "app_bundle_id"
+        case processIdentifier = "process_identifier"
         case windowID = "window_id"
+        case windowFrame = "window_frame"
         case elementID = "element_id"
         case frame
         case point
@@ -158,5 +166,42 @@ public struct VirtualCursorRecord: Codable, Equatable, Identifiable, Sendable, H
         case realMouseMoved = "real_mouse_moved"
         case focusPolicy = "focus_policy"
         case updatedAt = "updated_at"
+    }
+}
+
+public extension VirtualCursorTarget {
+    func offsetBy(dx: Double, dy: Double, liveWindowFrame: LMNHRect) -> VirtualCursorTarget {
+        var copy = self
+        copy.windowFrame = VirtualCursorFrame(
+            x: liveWindowFrame.x,
+            y: liveWindowFrame.y,
+            width: liveWindowFrame.width,
+            height: liveWindowFrame.height
+        )
+        if let frame {
+            copy.frame = VirtualCursorFrame(
+                x: frame.x + dx,
+                y: frame.y + dy,
+                width: frame.width,
+                height: frame.height
+            )
+        }
+        if let point {
+            copy.point = VirtualCursorPoint(
+                x: point.x + dx,
+                y: point.y + dy,
+                coordinateSpace: point.coordinateSpace
+            )
+        }
+        if let path {
+            copy.path = VirtualCursorPath(points: path.points.map {
+                VirtualCursorPoint(
+                    x: $0.x + dx,
+                    y: $0.y + dy,
+                    coordinateSpace: $0.coordinateSpace
+                )
+            })
+        }
+        return copy
     }
 }

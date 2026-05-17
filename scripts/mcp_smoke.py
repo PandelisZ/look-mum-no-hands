@@ -205,18 +205,22 @@ def main():
     if cursor["real_mouse_moved"]:
         raise AssertionError("Virtual cursor smoke moved the real mouse")
 
-    snapshot = snapshot_response["result"]["structuredContent"]["snapshot"]
-    if not snapshot["applications"]:
-        raise AssertionError("Snapshot did not include running applications")
-    if len(snapshot.get("virtualCursors", [])) != 1:
-        raise AssertionError("Snapshot did not retain virtual cursor state")
+    snapshot_result = snapshot_response["result"]
+    if "structuredContent" in snapshot_result:
+        raise AssertionError("Snapshot should be plaintext-only and must not include structuredContent")
+    snapshot_text = tool_text(snapshot_response)
+    if not snapshot_text.startswith("<macos_snapshot"):
+        raise AssertionError("Snapshot did not include XML-like LLM text")
+    if "accessibilityTree" in snapshot_text or '"applications"' in snapshot_text:
+        raise AssertionError("Snapshot leaked raw verbose fields")
 
     click_result = click_response["result"]["structuredContent"]["action"]
-    click_cursor = click_response["result"]["structuredContent"]["virtual_cursor"]
-    if click_cursor["real_mouse_moved"]:
+    if click_result["real_mouse_moved"]:
         raise AssertionError("Focusless click failure path moved the real mouse")
-    if click_result["executionLayer"] != "semantic_ax_at_position":
-        raise AssertionError(f"Unexpected click layer: {click_result['executionLayer']}")
+    if click_result["layer"] != "semantic_ax_at_position":
+        raise AssertionError(f"Unexpected click layer: {click_result['layer']}")
+    if "frontmostBefore" in click_result or "fallbacksAttempted" in click_result:
+        raise AssertionError("Click result leaked verbose internal action fields")
 
     type_tool = next(tool for tool in tools_response["result"]["tools"] if tool["name"] == "macos_type_text")
     type_schema = type_tool["inputSchema"]["properties"]
@@ -241,7 +245,7 @@ def main():
             raise AssertionError(f"macos_open_app schema missing {key}")
 
     print("MCP smoke passed")
-    print(f"tools={len(tool_names)} apps={len(snapshot['applications'])} windows={len(snapshot['windows'])} ax_elements={len(snapshot['accessibilityTree'])}")
+    print(f"tools={len(tool_names)} snapshot_chars={len(snapshot_text)}")
     print(permission_text)
 
 

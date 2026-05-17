@@ -17,7 +17,6 @@
     "mcp",
     "codex"
   ],
-  "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Look Mum No Hands",

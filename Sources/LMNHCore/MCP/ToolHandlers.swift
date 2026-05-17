@@ -215,11 +215,10 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             snapshot.warnings.append("OCR is not wired in this MCP transport slice.")
         }
 
-        return encodedToolResult(
-            summary: "Captured snapshot \(snapshot.id) with \(snapshot.applications.count) apps, \(snapshot.windows.count) windows, and \(snapshot.accessibilityTree.count) accessibility elements.",
-            structuredContent: [
-                "snapshot": snapshot
-            ]
+        let llmSnapshot = LLMSnapshotFormatter.format(snapshot)
+        return MCPToolResult.text(
+            llmSnapshot.text,
+            isError: false
         )
     }
 
@@ -247,7 +246,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         }
 
         let query = arguments["query"]?.stringValue?.lowercased()
-        let role = arguments["role"]?.stringValue
+        let role = normalizeRole(arguments["role"]?.stringValue)
         let visibleOnly = arguments["visible_only"]?.boolValue ?? true
         let limit = arguments["limit"]?.intValue ?? 20
         let records = snapshotService.elementRegistry.records(snapshotId: snapshotID)
@@ -273,6 +272,9 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             ]
             .compactMap { $0?.lowercased() }
             .contains { $0.contains(query) }
+        }
+        .sorted { left, right in
+            elementSearchScore(left, query: query) > elementSearchScore(right, query: query)
         }
         .prefix(max(1, limit))
 
@@ -493,6 +495,46 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         return LMNHPoint(x: x, y: y)
     }
 
+    private func normalizeRole(_ role: String?) -> String? {
+        guard let role, !role.isEmpty else {
+            return nil
+        }
+        if role.hasPrefix("AX") {
+            return role
+        }
+        return "AX" + role.prefix(1).uppercased() + role.dropFirst()
+    }
+
+    private func elementSearchScore(_ record: AccessibilityElementRecord, query: String?) -> Int {
+        let query = query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let label = record.label?.lowercased()
+        let title = record.title?.lowercased()
+        let description = record.description?.lowercased()
+        let value = record.valuePreview?.lowercased()
+        var score = 0
+
+        if record.visible { score += 100 }
+        if record.enabled != false { score += 20 }
+        if record.role == "AXButton" { score += 80 }
+        if record.defaultAction != nil { score += 60 }
+        if record.actions.contains(AXNames.Action.press) { score += 50 }
+        if record.role == "AXStaticText" { score -= 30 }
+        if record.role == "AXMenuItem" || record.role == "AXMenuBarItem" { score -= 40 }
+
+        if let query, !query.isEmpty {
+            if label == query { score += 200 }
+            if title == query { score += 160 }
+            if description == query { score += 120 }
+            if value == query { score += 50 }
+            if label?.contains(query) == true { score += 40 }
+            if title?.contains(query) == true { score += 30 }
+            if description?.contains(query) == true { score += 20 }
+            if value?.contains(query) == true { score += 10 }
+        }
+
+        return score
+    }
+
     private func makeCursorPoint(arguments: MCPJSONObject, coordinateSpace: String) -> VirtualCursorPoint? {
         guard case let .number(x)? = arguments["x"],
               case let .number(y)? = arguments["y"] else {
@@ -519,12 +561,29 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         let frame = element.frame.map {
             VirtualCursorFrame(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
         }
+        let windowFrame = windowInventory
+            .listWindows()
+            .filter { $0.ownerPID == element.processIdentifier && $0.layer == 0 && $0.isOnscreen && $0.bounds?.isUsableFrame == true }
+            .max { left, right in
+                overlapArea(left.bounds, element.frame) < overlapArea(right.bounds, element.frame)
+            }?
+            .bounds
+            .map { VirtualCursorFrame(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         return VirtualCursorTarget(
             appBundleID: element.bundleIdentifier,
+            processIdentifier: element.processIdentifier,
+            windowFrame: windowFrame,
             elementID: element.id,
             frame: frame,
             point: frame?.center
         )
+    }
+
+    private func overlapArea(_ lhs: LMNHRect?, _ rhs: LMNHRect?) -> Double {
+        guard let lhs, let rhs else { return 0 }
+        let xOverlap = max(0, min(lhs.x + lhs.width, rhs.x + rhs.width) - max(lhs.x, rhs.x))
+        let yOverlap = max(0, min(lhs.y + lhs.height, rhs.y + rhs.height) - max(lhs.y, rhs.y))
+        return xOverlap * yOverlap
     }
 
     private func setCursor(
@@ -559,11 +618,11 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         result: MacOSActionResult,
         virtualCursor: VirtualCursorRecord
     ) -> MCPToolResult {
-        encodedToolResult(
-            summary: summary,
+        let compact = CompactActionResult(action: result, cursor: virtualCursor)
+        return encodedToolResult(
+            summary: compact.text,
             structuredContent: [
-                "action": result,
-                "virtual_cursor": virtualCursor
+                "action": compact
             ],
             isError: result.status == .failed
         )
@@ -575,12 +634,11 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         diagnostics: TextEntryDiagnostics,
         virtualCursor: VirtualCursorRecord
     ) -> MCPToolResult {
-        encodedToolResult(
-            summary: summary,
+        let compact = CompactTextEntryResult(action: result, diagnostics: diagnostics, cursor: virtualCursor)
+        return encodedToolResult(
+            summary: compact.action.text,
             structuredContent: [
-                "action": result,
-                "typing": diagnostics,
-                "virtual_cursor": virtualCursor
+                "typing": compact
             ],
             isError: result.status == .failed
         )
