@@ -1,0 +1,20 @@
+{
+  "name": "look-mum-no-hands",
+  "version": "0.1.0",
+  "description": "macOS UI automation via the Look Mum No Hands MCP server, plus a skill that teaches Claude to use it instead of osascript/AppleScript.",
+  "author": {
+    "name": "Pandelis Z",
+    "url": "https://github.com/PandelisZ"
+  },
+  "homepage": "https://github.com/PandelisZ/look-mum-no-hands",
+  "repository": "https://github.com/PandelisZ/look-mum-no-hands",
+  "license": "MIT",
+  "keywords": [
+    "macos",
+    "desktop-automation",
+    "accessibility",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}
