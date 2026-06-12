@@ -16,6 +16,101 @@ It gives agents a focused macOS tool surface:
 
 The real mouse does not move. The virtual cursor is an overlay only.
 
+## Setup in Cursor
+
+Use this section if you want LMNH in **Cursor Agent** (or Chat with MCP tools enabled).
+
+### 1. Open this repo in Cursor
+
+Clone the repo and open the checkout as your Cursor workspace. LMNH is configured per-workspace via `.cursor/mcp.json`.
+
+### 2. Build the MCP server
+
+From the repo root:
+
+```bash
+swift build
+```
+
+The wrapper script auto-builds `lmnh-mcp` on first use if you skip this step, but building once upfront is faster.
+
+### 3. Grant macOS permissions
+
+```bash
+swift run lmnh-control
+```
+
+In the control app **Permissions** card:
+
+1. Click **Request Accessibility** and enable Look Mum No Hands in System Settings.
+2. Click **Screen Recording** if you want screenshot tools (`macos_get_screenshot`).
+3. Quit and reopen Cursor after changing permissions.
+
+macOS ties permissions to the executable that requests them. Cursor launches `lmnh-mcp` as a child process, so you may need to enable Accessibility for **both** Cursor and `lmnh-mcp` (or the debug binary under `.build/debug/`).
+
+### 4. Install the MCP server config
+
+**Option A — control app (recommended)**
+
+In the control app, click **Install Cursor**. This writes `.cursor/mcp.json` in the repo.
+
+**Option B — use the bundled config**
+
+If you cloned this repo, `.cursor/mcp.json` is already checked in. It should look like:
+
+```json
+{
+  "mcpServers": {
+    "look-mum-no-hands": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/plugins/look-mum-no-hands/scripts/run-lmnh-mcp.sh"
+      ],
+      "env": {
+        "LMNH_REPO_ROOT": "${workspaceFolder}",
+        "LMNH_LOG_LEVEL": "debug",
+        "LMNH_OVERLAY_RENDERER": "headless"
+      }
+    }
+  }
+}
+```
+
+The launch script builds `lmnh-mcp` if needed and runs `.build/debug/lmnh-mcp`.
+
+### 5. Enable MCP in Cursor
+
+1. Open **Cursor Settings → MCP** (or **Features → MCP**).
+2. Confirm `look-mum-no-hands` appears under MCP Servers with a green/connected status.
+3. If it is offline, click refresh or fully quit and reopen Cursor.
+4. Make sure MCP tools are enabled for the mode you use (Agent, Chat, etc.).
+
+### 6. Verify with an example prompt
+
+Start a **new Agent** chat in this workspace and paste:
+
+```text
+Use the Look Mum No Hands MCP tools (not osascript or shell keyboard events).
+
+1. Call macos_permission_status and tell me if anything is missing.
+2. Call macos_list_apps and macos_snapshot for the frontmost window.
+3. Find a clickable button or menu item in the snapshot and press it with macos_perform_action (AXPress) or macos_click.
+4. Tell me what changed and whether the real mouse moved (it should not).
+```
+
+A shorter smoke-test prompt:
+
+```text
+Use Look Mum No Hands: check macos_permission_status, snapshot the frontmost window, and describe the three most prominent interactive elements you see.
+```
+
+If tools are missing from the agent's tool list, the MCP server is not connected — recheck step 5 and the [troubleshooting](#troubleshooting) section.
+
+### Optional: teach the agent the LMNH workflow
+
+The repo bundles an agent skill at `plugins/look-mum-no-hands/skills/look-mum-no-hands/SKILL.md`. To make Cursor prefer LMNH over `osascript` / AppleScript on every session, add a project rule (`.cursor/rules/look-mum-no-hands.mdc`) that points agents at that skill, or paste its guidance into a User Rule.
+
 ## Quick Start
 
 ### 1. Build the local server
@@ -53,35 +148,15 @@ macOS permissions are tied to the exact app or executable identity. If permissio
 
 ### 4. Install MCP client configs
 
-In the control app, click:
+In the control app, click **Install All Plugins**, or install one client at a time.
 
-```text
-Install All Plugins
-```
+For **Cursor**, see [Setup in Cursor](#setup-in-cursor) for the full walkthrough and example prompts.
 
-Or install clients one at a time:
-
-- `Install Cursor`
-- `Install Codex`
-- `Install Claude`
-
-The app configures clients to launch the local development MCP server at:
-
-```text
-.build/debug/lmnh-mcp
-```
-
-Run `swift build` again whenever you change the server code.
+Codex and Claude register a stdio server that runs `.build/debug/lmnh-mcp` directly. Run `swift build` again whenever you change the server code, then restart the client.
 
 ### 5. Restart your AI client
 
 Restart Cursor, Codex, Claude, or the specific session using LMNH so it starts the current `lmnh-mcp` binary.
-
-Then ask your agent to use Look Mum No Hands, for example:
-
-```text
-Use Look Mum No Hands to inspect the frontmost app and click the Save button.
-```
 
 ## Requirements
 
@@ -97,17 +172,9 @@ The control app installs development configs. It does not move the repo or copy 
 
 ### Cursor
 
-`Install Cursor` writes a repo-local config:
+`Install Cursor` writes a repo-local config at `.cursor/mcp.json`. It launches the server through `plugins/look-mum-no-hands/scripts/run-lmnh-mcp.sh`, which builds and runs `.build/debug/lmnh-mcp` from the repo root.
 
-```text
-.cursor/mcp.json
-```
-
-It points Cursor at:
-
-```text
-/absolute/path/to/look-mum-no-hands/.build/debug/lmnh-mcp
-```
+See [Setup in Cursor](#setup-in-cursor) for step-by-step instructions and example prompts.
 
 ### Codex
 
@@ -269,6 +336,7 @@ LMNH currently exposes these tools:
 - `macos_hide_virtual_cursor`
 - `macos_perform_action`
 - `macos_click`
+- `macos_scroll` — focusless scrolling that drives the target's Accessibility scroll bars; works on background windows and never moves the real mouse or changes focus
 - `macos_type_text` — focusless AXValue text mutation with optional `submit: true` to fire the element's `AXConfirm` action afterwards
 
 Typical agent flow:
@@ -292,6 +360,12 @@ The MCP server gives agents structured macOS state and focused actions:
 - semantic AX actions before fallback click behavior
 - local command audit logging
 - visual cursor overlay for user awareness
+
+### Background by design
+
+LMNH never activates or raises a window. Inspection (`macos_snapshot`, `macos_get_screenshot`), interaction (`macos_perform_action`, `macos_click`, `macos_scroll`), and text entry (`macos_type_text`) all operate on background windows through the Accessibility API and per-window screen capture, so the app you are looking at never changes. There is deliberately no global key-press tool: keyboard shortcuts on a background app are expressed as Accessibility actions (`AXPress` on a menu item, `AXConfirm`, `AXCancel`, `AXPick`) instead of synthesized global keystrokes.
+
+Chromium- and Electron-based apps (Chrome, Slack, VS Code, Discord, ...) keep their Accessibility tree collapsed until a client opts in. `macos_snapshot` sets the enhanced-accessibility attributes (`AXManualAccessibility` / `AXEnhancedUserInterface`) automatically, so those apps become inspectable without being focused.
 
 The project is split into:
 

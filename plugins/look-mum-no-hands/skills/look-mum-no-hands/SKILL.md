@@ -12,10 +12,10 @@ LMNH exposes a Swift MCP server that drives macOS via the Accessibility (AX) API
 Trigger this skill when the user asks to:
 - inspect what is on screen (snapshot, screenshot, list windows/apps)
 - find a specific UI element (button, menu item, text field) by label or role
-- click, press, or perform an accessibility action on an element
-- type text into the focused field
+- click, press, scroll, or perform an accessibility action on an element
+- type text into a field without focusing or raising its window
 - show, move, or hide the virtual cursor overlay
-- open an app and operate it
+- operate a background app without bringing it to the foreground
 
 Do **not** fall back to `osascript`, `AppleScript`, `System Events`, shell keyboard events (`cliclick`, raw CGEvent scripting), or app-specific scripting bridges for UI control. Use the MCP tools below instead.
 
@@ -30,15 +30,14 @@ Do **not** fall back to `osascript`, `AppleScript`, `System Events`, shell keybo
 - `macos_perform_action` — perform a named AX action (e.g. `AXPress`, `AXShowMenu`, `AXConfirm`, `AXCancel`, `AXPick`, `AXIncrement`/`AXDecrement`) on an element. Fully focusless; prefer this for background windows.
 - `macos_click` — click at a point or on a resolved element. Uses the virtual cursor, not the real mouse.
 - `macos_scroll` — scroll a window/element by `direction` (`up`/`down`/`left`/`right`) and `pages`. Focusless: drives the target's AX scroll bars (works on background windows) and never moves the real mouse or changes focus.
-- `macos_press_key` — press a key/chord (`return`, `escape`, `cmd+s`, `shift+tab`, arrows, `f1`-`f12`) for the **frontmost** app only. It never activates a background window; targeting a non-frontmost app is refused. For background windows use `macos_type_text` or `macos_perform_action` instead.
 - `macos_type_text` — focusless text mutation via AXValue on a target element (`snapshot_id` + `element_id`); does not require or steal focus. Pass `submit: true` to fire the element's `AXConfirm` action after a successful write (reported as unsupported when the element has none).
 - `macos_set_virtual_cursor` / `macos_hide_virtual_cursor` — control the on-screen virtual pointer overlay.
 
 ## Recommended workflow
 
 1. Call `macos_permission_status`. If permissions are missing, surface the exact toggle the user must enable in System Settings → Privacy & Security; do not try to work around it.
-2. Use `macos_list_apps` / `macos_open_app` to make sure the target app is frontmost.
-3. Call `macos_snapshot` (or `macos_find_elements`) to locate the target element by role + label rather than by raw coordinates.
+2. Use `macos_list_apps` / `macos_list_windows` to find the target app and window. You do not need it frontmost — LMNH operates on background windows.
+3. Call `macos_snapshot` (with `app_bundle_id` for a background app) or `macos_find_elements` to locate the target element by role + label rather than by raw coordinates.
 4. Prefer `macos_perform_action` (`AXPress` etc.) over `macos_click` whenever the element exposes an AX action — it is more reliable and does not depend on layout.
 5. Fall back to `macos_click` with a resolved element handle if no AX action is available; only use raw screen coordinates as a last resort.
 6. For text entry, call `macos_type_text` with the element's `snapshot_id` + `element_id`; it writes via AXValue without focusing the window. Add `submit: true` when the field should be confirmed (search boxes, address bars).
@@ -46,9 +45,9 @@ Do **not** fall back to `osascript`, `AppleScript`, `System Events`, shell keybo
 
 ## Background apps
 
-- LMNH never focuses or activates a window. Snapshots, `macos_perform_action`, `macos_type_text`, `macos_get_screenshot`, and `macos_scroll` all work on background windows without bringing them forward.
+- LMNH never focuses or activates a window — that is the entire point of a background computer-use agent. Snapshots, `macos_perform_action`, `macos_type_text`, `macos_get_screenshot`, and `macos_scroll` all work on background windows without bringing them forward.
+- For keyboard shortcuts on a background app, do not look for a global key-press tool — drive the app's menu bar items with `macos_perform_action` (`AXPress`) or use the element's `AXConfirm`/`AXCancel`/`AXPick` actions. These are focusless.
 - Chromium/Electron apps (Chrome, Slack, VS Code, Discord, ...) expose almost no AX tree until activated. `macos_snapshot` sets the enhanced-accessibility attributes automatically; if the first snapshot of such an app looks sparse, snapshot once more.
-- `macos_press_key` is the one input that requires the target to already be frontmost (keystrokes inherently go to the focused app). It refuses non-frontmost targets rather than stealing focus.
 
 ## Safety
 
