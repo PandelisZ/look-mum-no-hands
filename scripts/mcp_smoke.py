@@ -24,7 +24,6 @@ EXPECTED_TOOLS = {
     "macos_click",
     "macos_type_text",
     "macos_scroll",
-    "macos_press_key",
 }
 
 
@@ -172,7 +171,7 @@ def main():
             "method": "tools/call",
             "params": {
                 "name": "macos_scroll",
-                "arguments": {"direction": "down", "pages": 0.1, "x": 200, "y": 200},
+                "arguments": {"direction": "down", "pages": 0.1},
             },
         },
         {
@@ -182,15 +181,6 @@ def main():
             "params": {
                 "name": "macos_scroll",
                 "arguments": {"direction": "sideways"},
-            },
-        },
-        {
-            "jsonrpc": "2.0",
-            "id": 12,
-            "method": "tools/call",
-            "params": {
-                "name": "macos_press_key",
-                "arguments": {"key": "totally-not-a-key"},
             },
         },
     ]
@@ -276,19 +266,14 @@ def main():
     scroll_result = response_by_id(messages, 10)["result"]["structuredContent"]["action"]
     if scroll_result["real_mouse_moved"]:
         raise AssertionError("Focusless scroll moved the real mouse")
-    if scroll_result["layer"] != "targeted_quartz_event":
-        raise AssertionError(f"Unexpected scroll layer: {scroll_result['layer']}")
+    if scroll_result["layer"] != "semantic_ax":
+        raise AssertionError(f"Scroll must use the focusless AX layer, got: {scroll_result['layer']}")
+    if scroll_result["focus"] not in ("no_focus_change", "failed_before_focus_change"):
+        raise AssertionError(f"Scroll must never change focus, got: {scroll_result['focus']}")
 
     bad_scroll = response_by_id(messages, 11)["result"]
     if not bad_scroll["isError"]:
         raise AssertionError("Invalid scroll direction should error")
-
-    bad_key = response_by_id(messages, 12)["result"]
-    if not bad_key["isError"]:
-        raise AssertionError("Unsupported key combination should error")
-    bad_key_action = bad_key["structuredContent"]["action"]
-    if bad_key_action["real_mouse_moved"]:
-        raise AssertionError("Failed key press moved the real mouse")
 
     print("MCP smoke passed")
     print(f"tools={len(tool_names)} snapshot_chars={len(snapshot_text)}")

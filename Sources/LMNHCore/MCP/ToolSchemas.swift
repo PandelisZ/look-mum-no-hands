@@ -15,7 +15,6 @@ public enum LMNHMCPTools {
     public static let click = "macos_click"
     public static let typeText = "macos_type_text"
     public static let scroll = "macos_scroll"
-    public static let pressKey = "macos_press_key"
 
     public static let allDefinitions: [MCPToolDefinition] = [
         MCPToolDefinition(
@@ -273,56 +272,27 @@ public enum LMNHMCPTools {
         ),
         MCPToolDefinition(
             name: scroll,
-            description: "Scroll a window or element without moving the real mouse or changing focus. Delivers a scroll wheel event directly to the target process with CGEvent.postToPid.",
+            description: "Scroll a window or element without moving the real mouse or changing focus. Drives the target's Accessibility scroll bars, so it works on fully background windows and never brings them forward.",
             inputSchema: objectSchema(
                 properties: [
                     "snapshot_id": .object(["type": .string("string")]),
                     "element_id": .object([
                         "type": .string("string"),
-                        "description": .string("Element to scroll over; its frame center is used as the scroll point.")
+                        "description": .string("Element to scroll; its scroll bars (or its window's) are driven via Accessibility.")
                     ]),
                     "direction": stringEnum(["up", "down", "left", "right"], defaultValue: "down"),
                     "pages": .object([
                         "type": .string("number"),
                         "default": .number(1),
                         "minimum": .number(0.05),
-                        "description": .string("Scroll magnitude in pages; ~8 wheel ticks per page.")
+                        "description": .string("Scroll magnitude in pages.")
                     ]),
-                    "x": .object(["type": .string("number")]),
-                    "y": .object(["type": .string("number")]),
                     "target_pid": .object([
                         "type": .string("integer"),
-                        "description": .string("Target process id when scrolling by x,y without an element.")
+                        "description": .string("Process id whose frontmost scroll area to scroll when no element is supplied; defaults to the frontmost application.")
                     ])
                 ],
                 required: ["direction"]
-            ),
-            annotations: .object([
-                "readOnlyHint": .bool(false),
-                "destructiveHint": .bool(false),
-                "openWorldHint": .bool(true)
-            ])
-        ),
-        MCPToolDefinition(
-            name: pressKey,
-            description: "Press a key or key combination (e.g. \"return\", \"escape\", \"cmd+s\", \"shift+tab\") delivered to a target window without moving the real mouse or stealing focus. The keystroke goes to the target app's focused element.",
-            inputSchema: objectSchema(
-                properties: [
-                    "key": .object([
-                        "type": .string("string"),
-                        "description": .string("Key combination using + as a separator. Modifiers: cmd/command, ctrl/control, option/alt, shift, fn. Named keys: return, enter, escape, tab, space, delete, arrows, home, end, pageup, pagedown, f1-f12.")
-                    ]),
-                    "snapshot_id": .object(["type": .string("string")]),
-                    "element_id": .object([
-                        "type": .string("string"),
-                        "description": .string("Optional element used to resolve the target window; the key still routes to the app's focused element.")
-                    ]),
-                    "target_pid": .object([
-                        "type": .string("integer"),
-                        "description": .string("Optional target process id; defaults to the frontmost application.")
-                    ])
-                ],
-                required: ["key"]
             ),
             annotations: .object([
                 "readOnlyHint": .bool(false),

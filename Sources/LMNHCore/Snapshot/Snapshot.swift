@@ -134,7 +134,7 @@ public final class SnapshotService {
                     // Chromium/Electron apps populate their AX tree asynchronously after the
                     // enhanced-accessibility attributes are set; give it a brief moment.
                     Thread.sleep(forTimeInterval: 0.35)
-                    warnings.append("Enabled enhanced accessibility for \(targetApplication.localizedName ?? "target app"); re-run macos_snapshot if the tree looks incomplete.")
+                    warnings.append("Enabled enhanced accessibility for \(targetApplication.localizedName); re-run macos_snapshot if the tree looks incomplete.")
                 }
             }
 

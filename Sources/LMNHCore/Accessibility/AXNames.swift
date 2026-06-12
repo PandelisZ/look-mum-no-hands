@@ -21,6 +21,17 @@ public enum AXNames {
         public static let children = "AXChildren"
         public static let visibleChildren = "AXVisibleChildren"
         public static let childrenInNavigationOrder = "AXChildrenInNavigationOrder"
+        public static let contents = "AXContents"
+        public static let orientation = "AXOrientation"
+        public static let minValue = "AXMinValue"
+        public static let maxValue = "AXMaxValue"
+        public static let verticalScrollBar = "AXVerticalScrollBar"
+        public static let horizontalScrollBar = "AXHorizontalScrollBar"
+    }
+
+    public enum Orientation {
+        public static let vertical = "AXVerticalOrientation"
+        public static let horizontal = "AXHorizontalOrientation"
     }
 
     public enum Action {
@@ -37,5 +48,7 @@ public enum AXNames {
 
     public enum Role {
         public static let window = "AXWindow"
+        public static let scrollBar = "AXScrollBar"
+        public static let scrollArea = "AXScrollArea"
     }
 }

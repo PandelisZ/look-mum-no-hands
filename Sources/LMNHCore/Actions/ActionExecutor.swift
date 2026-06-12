@@ -7,18 +7,15 @@ public final class ActionExecutor {
     private let elementRegistry: ElementRegistry
     private let axClient: AXClient
     private let safetyClassifier: SafetyClassifier
-    private let windowInventory: WindowInventory
 
     public init(
         elementRegistry: ElementRegistry,
         axClient: AXClient = AXClient(),
-        safetyClassifier: SafetyClassifier = SafetyClassifier(),
-        windowInventory: WindowInventory = WindowInventory()
+        safetyClassifier: SafetyClassifier = SafetyClassifier()
     ) {
         self.elementRegistry = elementRegistry
         self.axClient = axClient
         self.safetyClassifier = safetyClassifier
-        self.windowInventory = windowInventory
     }
 
     public func performAction(
@@ -344,8 +341,7 @@ public final class ActionExecutor {
     public func scroll(
         snapshotId: String?,
         elementId: String?,
-        point: LMNHPoint?,
-        direction: TargetedEventDispatcher.ScrollDirection,
+        direction: ScrollDirection,
         pages: Double,
         targetProcessIdentifier: Int32?
     ) -> MacOSActionResult {
@@ -358,103 +354,41 @@ public final class ActionExecutor {
         guard let processIdentifier else {
             return failedResult(
                 requested: requested,
-                layer: .targetedQuartzEvent,
+                layer: .semanticAX,
                 elementId: elementId,
                 error: nil,
                 warning: "scroll requires a resolvable element, target_pid, or a frontmost application"
             )
         }
 
-        let elementFrame = element?.record.frame?.cgRect
-        guard let screenPoint = (element?.record.frame?.center.cgPoint) ?? point?.cgPoint else {
-            return failedResult(
-                requested: requested,
-                layer: .targetedQuartzEvent,
-                elementId: elementId,
-                error: nil,
-                warning: "scroll requires an element with a frame or an explicit x,y point"
-            )
-        }
-
-        let window = resolveWindow(processIdentifier: processIdentifier, near: elementFrame ?? CGRect(origin: screenPoint, size: .zero))
-        let dispatcher = TargetedEventDispatcher(
-            targetProcessIdentifier: processIdentifier,
-            windowNumber: window?.id ?? 0,
-            windowFrame: window?.bounds?.cgRect ?? .zero
-        )
+        let vertical = direction == .up || direction == .down
+        let increment = direction == .down || direction == .right
 
         let frontmostBefore = frontmostBundleIdentifier()
-        let posted = dispatcher.scroll(atScreenPoint: screenPoint, direction: direction, pages: pages)
-        let frontmostAfter = frontmostBundleIdentifier()
 
-        return MacOSActionResult(
-            requested: requested,
-            status: posted ? .completed : .failed,
-            executionLayer: .targetedQuartzEvent,
-            focusPolicy: posted ? .noFocusChange : .failedBeforeFocusChange,
-            frontmostBefore: frontmostBefore,
-            frontmostAfter: frontmostAfter,
-            targetBundleIdentifier: element?.record.bundleIdentifier,
-            targetProcessIdentifier: processIdentifier,
-            elementId: elementId,
-            point: LMNHPoint(screenPoint),
-            realMouseMoved: false,
-            fallbacksAttempted: ["postToPid scroll wheel"],
-            warnings: posted ? focusWarnings(error: .success, before: frontmostBefore, after: frontmostAfter) : ["scroll_event_post_failed"]
-        )
-    }
-
-    public func pressKey(
-        snapshotId: String?,
-        elementId: String?,
-        keyCombination: String,
-        targetProcessIdentifier: Int32?
-    ) -> MacOSActionResult {
-        let requested = "press \(keyCombination)"
-        let element = resolveElement(snapshotId: snapshotId, elementId: elementId)
-        let processIdentifier = element?.record.processIdentifier
-            ?? targetProcessIdentifier
-            ?? frontmostProcessIdentifier()
-        guard let processIdentifier else {
-            return failedResult(
-                requested: requested,
-                layer: .targetedQuartzEvent,
-                elementId: elementId,
-                error: nil,
-                warning: "press_key requires a resolvable element, target_pid, or a frontmost application"
-            )
+        // Focusless AX scrolling via the target's scroll bars. This drives the window's own
+        // scroll bars through the Accessibility API, so it never activates the window, never
+        // moves the real mouse, and works on fully background windows.
+        var performed = false
+        if let element {
+            performed = performAXScroll(start: element.handle, vertical: vertical, increment: increment, pages: pages)
+        }
+        if !performed {
+            let appRoot = axClient.applicationElement(processIdentifier: processIdentifier)
+            performed = performAXScroll(start: appRoot, vertical: vertical, increment: increment, pages: pages)
         }
 
-        let window = resolveWindow(processIdentifier: processIdentifier, near: element?.record.frame?.cgRect)
-        let dispatcher = TargetedEventDispatcher(
-            targetProcessIdentifier: processIdentifier,
-            windowNumber: window?.id ?? 0,
-            windowFrame: window?.bounds?.cgRect ?? .zero
-        )
-
-        let frontmostBefore = frontmostBundleIdentifier()
-        let outcome = dispatcher.press(keyCombination: keyCombination)
         let frontmostAfter = frontmostBundleIdentifier()
-
-        let status: ActionResultStatus
-        var warnings: [String] = []
-        switch outcome {
-        case .delivered:
-            status = .completed
-            warnings = focusWarnings(error: .success, before: frontmostBefore, after: frontmostAfter)
-        case .unsupported(let token):
-            status = .failed
-            warnings = ["unsupported_key_combination: \(token)"]
-        case .failed:
-            status = .failed
-            warnings = ["key_event_creation_failed"]
+        var warnings = focusWarnings(error: .success, before: frontmostBefore, after: frontmostAfter)
+        if !performed {
+            warnings.append("no_ax_scroll_bar_found: the target exposes no Accessibility scroll bar for this direction")
         }
 
         return MacOSActionResult(
             requested: requested,
-            status: status,
-            executionLayer: .targetedQuartzEvent,
-            focusPolicy: status == .completed ? .noFocusChange : .failedBeforeFocusChange,
+            status: performed ? .completed : .failed,
+            executionLayer: .semanticAX,
+            focusPolicy: performed ? .noFocusChange : .failedBeforeFocusChange,
             frontmostBefore: frontmostBefore,
             frontmostAfter: frontmostAfter,
             targetBundleIdentifier: element?.record.bundleIdentifier,
@@ -462,43 +396,99 @@ public final class ActionExecutor {
             elementId: elementId,
             point: element?.record.frame?.center,
             realMouseMoved: false,
-            fallbacksAttempted: ["postToPid key events"],
+            fallbacksAttempted: ["ax_scrollbar"],
             warnings: warnings
         )
+    }
+
+    private func performAXScroll(
+        start: AXElementHandle,
+        vertical: Bool,
+        increment: Bool,
+        pages: Double,
+        maxNodes: Int = 2000
+    ) -> Bool {
+        let bars = findScrollBars(start: start, vertical: vertical, maxNodes: maxNodes)
+        let action = increment ? AXNames.Action.increment : AXNames.Action.decrement
+        let repetitions = max(1, Int((max(0.05, pages) * 3).rounded(.up)))
+
+        for bar in bars {
+            var performed = false
+            for _ in 0 ..< repetitions {
+                guard axClient.performAction(action, on: bar) == .success else {
+                    break
+                }
+                performed = true
+                usleep(20_000)
+            }
+            if performed {
+                return true
+            }
+            if setScrollBarValue(bar, increment: increment, pages: pages) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func findScrollBars(start: AXElementHandle, vertical: Bool, maxNodes: Int) -> [AXElementHandle] {
+        var result: [AXElementHandle] = []
+        var stack: [AXElementHandle] = [start]
+        var visited: Set<CFHashCode> = []
+        var count = 0
+        let relationshipAttributes = [
+            AXNames.Attribute.verticalScrollBar,
+            AXNames.Attribute.horizontalScrollBar,
+            AXNames.Attribute.contents,
+            AXNames.Attribute.children
+        ]
+
+        while let current = stack.popLast(), count < maxNodes {
+            count += 1
+            guard visited.insert(CFHash(current.raw)).inserted else {
+                continue
+            }
+
+            if axClient.stringAttribute(AXNames.Attribute.role, of: current) == AXNames.Role.scrollBar {
+                let orientation = axClient.stringAttribute(AXNames.Attribute.orientation, of: current)
+                let matchesOrientation = orientation == nil
+                    || (vertical && orientation == AXNames.Orientation.vertical)
+                    || (!vertical && orientation == AXNames.Orientation.horizontal)
+                if matchesOrientation {
+                    result.append(current)
+                }
+                continue
+            }
+
+            for attribute in relationshipAttributes {
+                stack.append(contentsOf: axClient.elementAttribute(attribute, of: current))
+            }
+        }
+
+        return result
+    }
+
+    private func setScrollBarValue(_ bar: AXElementHandle, increment: Bool, pages: Double) -> Bool {
+        guard axClient.isAttributeSettable(AXNames.Attribute.value, of: bar),
+              let current = axClient.doubleAttribute(AXNames.Attribute.value, of: bar) else {
+            return false
+        }
+
+        let minValue = axClient.doubleAttribute(AXNames.Attribute.minValue, of: bar) ?? 0
+        let maxValue = axClient.doubleAttribute(AXNames.Attribute.maxValue, of: bar) ?? 1
+        let span = max(maxValue - minValue, 0.01)
+        let delta = span * 0.18 * max(0.05, pages)
+        let target = min(max(current + (increment ? delta : -delta), minValue), maxValue)
+        guard abs(target - current) > 0.0001 else {
+            return false
+        }
+
+        return axClient.setNumberValue(target, on: bar) == .success
     }
 
     private func resolveElement(snapshotId: String?, elementId: String?) -> RegisteredElement? {
         guard let snapshotId, let elementId else { return nil }
         return elementRegistry.resolve(snapshotId: snapshotId, elementId: elementId)
-    }
-
-    private func resolveWindow(processIdentifier: Int32, near frame: CGRect?) -> MacOSWindowInfo? {
-        let windows = windowInventory.listWindows()
-            .filter { $0.ownerPID == processIdentifier && $0.layer == 0 && $0.isOnscreen && ($0.bounds?.isUsableFrame ?? false) }
-        guard !windows.isEmpty else { return nil }
-
-        if let frame, frame.width > 0 || frame.height > 0 {
-            return windows.max { overlapArea($0.bounds, frame) < overlapArea($1.bounds, frame) }
-        }
-        if let frame {
-            // zero-size frame: pick the window containing the point
-            let point = frame.origin
-            if let containing = windows.first(where: { $0.bounds?.cgRect.contains(point) == true }) {
-                return containing
-            }
-        }
-        return windows.max { area($0.bounds) < area($1.bounds) }
-    }
-
-    private func area(_ rect: LMNHRect?) -> Double {
-        guard let rect else { return 0 }
-        return rect.width * rect.height
-    }
-
-    private func overlapArea(_ lhs: LMNHRect?, _ rhs: CGRect) -> Double {
-        guard let lhs else { return 0 }
-        let l = lhs.cgRect.intersection(rhs)
-        return l.isNull ? 0 : l.width * l.height
     }
 
     private func frontmostProcessIdentifier() -> Int32? {

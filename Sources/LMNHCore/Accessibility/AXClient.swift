@@ -77,6 +77,33 @@ public struct AXClient: Sendable {
         return children.map(AXElementHandle.init)
     }
 
+    /// Returns child handles whether the attribute holds a single AXUIElement or an array of them.
+    public func elementAttribute(_ attribute: String, of element: AXElementHandle) -> [AXElementHandle] {
+        guard let value = attributeValue(attribute, of: element) else {
+            return []
+        }
+        if let array = value as? [AXUIElement] {
+            return array.map(AXElementHandle.init)
+        }
+        if CFGetTypeID(value as CFTypeRef) == AXUIElementGetTypeID() {
+            return [AXElementHandle(value as! AXUIElement)]
+        }
+        return []
+    }
+
+    public func doubleAttribute(_ attribute: String, of element: AXElementHandle) -> Double? {
+        switch attributeValue(attribute, of: element) {
+        case let number as NSNumber:
+            number.doubleValue
+        case let double as Double:
+            double
+        case let int as Int:
+            Double(int)
+        default:
+            nil
+        }
+    }
+
     public func rectAttribute(_ attribute: String, of element: AXElementHandle) -> CGRect? {
         valueBridge.rect(from: attributeValue(attribute, of: element))
     }
@@ -129,6 +156,11 @@ public struct AXClient: Sendable {
     @discardableResult
     public func setStringValue(_ value: String, on element: AXElementHandle, attribute: String = AXNames.Attribute.value) -> AXError {
         AXUIElementSetAttributeValue(element.raw, attribute as CFString, value as CFString)
+    }
+
+    @discardableResult
+    public func setNumberValue(_ value: Double, on element: AXElementHandle, attribute: String = AXNames.Attribute.value) -> AXError {
+        AXUIElementSetAttributeValue(element.raw, attribute as CFString, NSNumber(value: value))
     }
 
     @discardableResult

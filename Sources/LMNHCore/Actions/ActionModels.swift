@@ -32,6 +32,13 @@ public enum TextEntryMutationMode: String, Codable, Sendable {
     case selection
 }
 
+public enum ScrollDirection: String, Codable, Sendable {
+    case up
+    case down
+    case left
+    case right
+}
+
 public struct TextEntryDiagnostics: Codable, Sendable {
     public var method: String
     public var requestedMode: String

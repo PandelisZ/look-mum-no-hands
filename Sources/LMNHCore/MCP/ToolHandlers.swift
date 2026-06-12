@@ -17,7 +17,6 @@ public protocol LMNHMacOSAutomationServing: Sendable {
     func click(arguments: MCPJSONObject) async -> MCPToolResult
     func typeText(arguments: MCPJSONObject) async -> MCPToolResult
     func scroll(arguments: MCPJSONObject) async -> MCPToolResult
-    func pressKey(arguments: MCPJSONObject) async -> MCPToolResult
 }
 
 public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sendable {
@@ -101,10 +100,6 @@ public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sen
 
     public func scroll(arguments: MCPJSONObject) async -> MCPToolResult {
         placeholderResult(toolName: LMNHMCPTools.scroll, summary: "Scroll service is not wired yet.")
-    }
-
-    public func pressKey(arguments: MCPJSONObject) async -> MCPToolResult {
-        placeholderResult(toolName: LMNHMCPTools.pressKey, summary: "Key press service is not wired yet.")
     }
 
     private func placeholderResult(toolName: String, summary: String) -> MCPToolResult {
@@ -584,7 +579,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
 
     public func scroll(arguments: MCPJSONObject) async -> MCPToolResult {
         guard let directionRaw = arguments["direction"]?.stringValue,
-              let direction = TargetedEventDispatcher.ScrollDirection(rawValue: directionRaw) else {
+              let direction = ScrollDirection(rawValue: directionRaw) else {
             return MCPToolResult.text(
                 "macos_scroll requires direction up, down, left, or right.",
                 structuredContent: .object([
@@ -609,7 +604,6 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         let result = actionExecutor.scroll(
             snapshotId: snapshotID,
             elementId: elementID,
-            point: makePoint(arguments: arguments),
             direction: direction,
             pages: arguments["pages"]?.doubleValue ?? 1,
             targetProcessIdentifier: arguments["target_pid"]?.intValue.map(Int32.init)
@@ -618,36 +612,8 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
 
         return actionToolResult(
             summary: result.status == .completed
-                ? "Scrolled \(direction.rawValue) without moving the real mouse."
-                : "Scroll \(direction.rawValue) failed before moving the real mouse.",
-            result: result,
-            virtualCursor: cursor
-        )
-    }
-
-    public func pressKey(arguments: MCPJSONObject) async -> MCPToolResult {
-        guard let key = arguments["key"]?.stringValue, !key.isEmpty else {
-            return missingArgumentResult(toolName: LMNHMCPTools.pressKey, required: ["key"])
-        }
-
-        let snapshotID = arguments["snapshot_id"]?.stringValue
-        let elementID = arguments["element_id"]?.stringValue
-        let element = snapshotID.flatMap { snapshotID in
-            elementID.flatMap { snapshotService.elementRegistry.resolve(snapshotId: snapshotID, elementId: $0) }
-        }
-
-        let result = actionExecutor.pressKey(
-            snapshotId: snapshotID,
-            elementId: elementID,
-            keyCombination: key,
-            targetProcessIdentifier: arguments["target_pid"]?.intValue.map(Int32.init)
-        )
-        let cursor = setCursor(for: result, element: element?.record, state: result.status == .completed ? .typing : .blocked)
-
-        return actionToolResult(
-            summary: result.status == .completed
-                ? "Pressed \(key) without moving the real mouse."
-                : "Failed to press \(key).",
+                ? "Scrolled \(direction.rawValue) without moving the real mouse or changing focus."
+                : "Scroll \(direction.rawValue) found no Accessibility scroll bar.",
             result: result,
             virtualCursor: cursor
         )
@@ -901,8 +867,6 @@ public actor MCPToolRouter {
             await service.typeText(arguments: arguments)
         case LMNHMCPTools.scroll:
             await service.scroll(arguments: arguments)
-        case LMNHMCPTools.pressKey:
-            await service.pressKey(arguments: arguments)
         default:
             MCPToolResult.text(
                 "Unknown tool: \(name)",
