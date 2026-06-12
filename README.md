@@ -16,6 +16,12 @@ It gives agents a focused macOS tool surface:
 
 The real mouse does not move. The virtual cursor is an overlay only.
 
+<p align="center">
+  <img src="docs/screenshots/control-app-cursor-options.png" width="900" alt="Look Mum No Hands control app showing permissions, MCP install buttons, and virtual cursor options">
+</p>
+
+<p align="center"><em>The SwiftUI control app: grant permissions, install MCP configs, pick a virtual cursor style, and tail the MCP audit log.</em></p>
+
 ## Setup in Cursor
 
 Use this section if you want LMNH in **Cursor Agent** (or Chat with MCP tools enabled).
@@ -47,6 +53,10 @@ In the control app **Permissions** card:
 3. Quit and reopen Cursor after changing permissions.
 
 macOS ties permissions to the executable that requests them. Cursor launches `lmnh-mcp` as a child process, so you may need to enable Accessibility for **both** Cursor and `lmnh-mcp` (or the debug binary under `.build/debug/`).
+
+<p align="center">
+  <img src="docs/screenshots/control-app-setup.png" width="420" alt="Permissions and MCP Server cards in the control app">
+</p>
 
 ### 4. Install the MCP server config
 
@@ -106,6 +116,12 @@ Use Look Mum No Hands: check macos_permission_status, snapshot the frontmost win
 ```
 
 If tools are missing from the agent's tool list, the MCP server is not connected — recheck step 5 and the [troubleshooting](#troubleshooting) section.
+
+<p align="center">
+  <img src="docs/screenshots/virtual-cursor-demo.png" width="900" alt="Look Mum No Hands running on the desktop while Cursor uses the MCP tools in the background">
+</p>
+
+<p align="center"><em>LMNH running locally while an agent in Cursor drives macOS through the MCP server — your real mouse stays put.</em></p>
 
 ### Optional: teach the agent the LMNH workflow
 
@@ -299,6 +315,10 @@ The Cursor Options pane controls the virtual cursor overlay:
 - choose the cursor artwork
 - preview the selected cursor
 - adjust size and animation timing
+
+<p align="center">
+  <img src="docs/screenshots/virtual-cursor-preview.png" width="720" alt="Virtual cursor preview showing an animated cursor following a path">
+</p>
 
 The bundled cursor styles include the default LMNH cursor and several RealWorld Designer cursor assets. The source and license notes for those assets live at:
 
