@@ -7,15 +7,18 @@ public final class ActionExecutor {
     private let elementRegistry: ElementRegistry
     private let axClient: AXClient
     private let safetyClassifier: SafetyClassifier
+    private let windowInventory: WindowInventory
 
     public init(
         elementRegistry: ElementRegistry,
         axClient: AXClient = AXClient(),
-        safetyClassifier: SafetyClassifier = SafetyClassifier()
+        safetyClassifier: SafetyClassifier = SafetyClassifier(),
+        windowInventory: WindowInventory = WindowInventory()
     ) {
         self.elementRegistry = elementRegistry
         self.axClient = axClient
         self.safetyClassifier = safetyClassifier
+        self.windowInventory = windowInventory
     }
 
     public func performAction(
@@ -336,6 +339,170 @@ public final class ActionExecutor {
                 error: error
             )
         }
+    }
+
+    public func scroll(
+        snapshotId: String?,
+        elementId: String?,
+        point: LMNHPoint?,
+        direction: TargetedEventDispatcher.ScrollDirection,
+        pages: Double,
+        targetProcessIdentifier: Int32?
+    ) -> MacOSActionResult {
+        let requested = "scroll \(direction.rawValue)"
+        let element = resolveElement(snapshotId: snapshotId, elementId: elementId)
+
+        let processIdentifier = element?.record.processIdentifier
+            ?? targetProcessIdentifier
+            ?? frontmostProcessIdentifier()
+        guard let processIdentifier else {
+            return failedResult(
+                requested: requested,
+                layer: .targetedQuartzEvent,
+                elementId: elementId,
+                error: nil,
+                warning: "scroll requires a resolvable element, target_pid, or a frontmost application"
+            )
+        }
+
+        let elementFrame = element?.record.frame?.cgRect
+        guard let screenPoint = (element?.record.frame?.center.cgPoint) ?? point?.cgPoint else {
+            return failedResult(
+                requested: requested,
+                layer: .targetedQuartzEvent,
+                elementId: elementId,
+                error: nil,
+                warning: "scroll requires an element with a frame or an explicit x,y point"
+            )
+        }
+
+        let window = resolveWindow(processIdentifier: processIdentifier, near: elementFrame ?? CGRect(origin: screenPoint, size: .zero))
+        let dispatcher = TargetedEventDispatcher(
+            targetProcessIdentifier: processIdentifier,
+            windowNumber: window?.id ?? 0,
+            windowFrame: window?.bounds?.cgRect ?? .zero
+        )
+
+        let frontmostBefore = frontmostBundleIdentifier()
+        let posted = dispatcher.scroll(atScreenPoint: screenPoint, direction: direction, pages: pages)
+        let frontmostAfter = frontmostBundleIdentifier()
+
+        return MacOSActionResult(
+            requested: requested,
+            status: posted ? .completed : .failed,
+            executionLayer: .targetedQuartzEvent,
+            focusPolicy: posted ? .noFocusChange : .failedBeforeFocusChange,
+            frontmostBefore: frontmostBefore,
+            frontmostAfter: frontmostAfter,
+            targetBundleIdentifier: element?.record.bundleIdentifier,
+            targetProcessIdentifier: processIdentifier,
+            elementId: elementId,
+            point: LMNHPoint(screenPoint),
+            realMouseMoved: false,
+            fallbacksAttempted: ["postToPid scroll wheel"],
+            warnings: posted ? focusWarnings(error: .success, before: frontmostBefore, after: frontmostAfter) : ["scroll_event_post_failed"]
+        )
+    }
+
+    public func pressKey(
+        snapshotId: String?,
+        elementId: String?,
+        keyCombination: String,
+        targetProcessIdentifier: Int32?
+    ) -> MacOSActionResult {
+        let requested = "press \(keyCombination)"
+        let element = resolveElement(snapshotId: snapshotId, elementId: elementId)
+        let processIdentifier = element?.record.processIdentifier
+            ?? targetProcessIdentifier
+            ?? frontmostProcessIdentifier()
+        guard let processIdentifier else {
+            return failedResult(
+                requested: requested,
+                layer: .targetedQuartzEvent,
+                elementId: elementId,
+                error: nil,
+                warning: "press_key requires a resolvable element, target_pid, or a frontmost application"
+            )
+        }
+
+        let window = resolveWindow(processIdentifier: processIdentifier, near: element?.record.frame?.cgRect)
+        let dispatcher = TargetedEventDispatcher(
+            targetProcessIdentifier: processIdentifier,
+            windowNumber: window?.id ?? 0,
+            windowFrame: window?.bounds?.cgRect ?? .zero
+        )
+
+        let frontmostBefore = frontmostBundleIdentifier()
+        let outcome = dispatcher.press(keyCombination: keyCombination)
+        let frontmostAfter = frontmostBundleIdentifier()
+
+        let status: ActionResultStatus
+        var warnings: [String] = []
+        switch outcome {
+        case .delivered:
+            status = .completed
+            warnings = focusWarnings(error: .success, before: frontmostBefore, after: frontmostAfter)
+        case .unsupported(let token):
+            status = .failed
+            warnings = ["unsupported_key_combination: \(token)"]
+        case .failed:
+            status = .failed
+            warnings = ["key_event_creation_failed"]
+        }
+
+        return MacOSActionResult(
+            requested: requested,
+            status: status,
+            executionLayer: .targetedQuartzEvent,
+            focusPolicy: status == .completed ? .noFocusChange : .failedBeforeFocusChange,
+            frontmostBefore: frontmostBefore,
+            frontmostAfter: frontmostAfter,
+            targetBundleIdentifier: element?.record.bundleIdentifier,
+            targetProcessIdentifier: processIdentifier,
+            elementId: elementId,
+            point: element?.record.frame?.center,
+            realMouseMoved: false,
+            fallbacksAttempted: ["postToPid key events"],
+            warnings: warnings
+        )
+    }
+
+    private func resolveElement(snapshotId: String?, elementId: String?) -> RegisteredElement? {
+        guard let snapshotId, let elementId else { return nil }
+        return elementRegistry.resolve(snapshotId: snapshotId, elementId: elementId)
+    }
+
+    private func resolveWindow(processIdentifier: Int32, near frame: CGRect?) -> MacOSWindowInfo? {
+        let windows = windowInventory.listWindows()
+            .filter { $0.ownerPID == processIdentifier && $0.layer == 0 && $0.isOnscreen && ($0.bounds?.isUsableFrame ?? false) }
+        guard !windows.isEmpty else { return nil }
+
+        if let frame, frame.width > 0 || frame.height > 0 {
+            return windows.max { overlapArea($0.bounds, frame) < overlapArea($1.bounds, frame) }
+        }
+        if let frame {
+            // zero-size frame: pick the window containing the point
+            let point = frame.origin
+            if let containing = windows.first(where: { $0.bounds?.cgRect.contains(point) == true }) {
+                return containing
+            }
+        }
+        return windows.max { area($0.bounds) < area($1.bounds) }
+    }
+
+    private func area(_ rect: LMNHRect?) -> Double {
+        guard let rect else { return 0 }
+        return rect.width * rect.height
+    }
+
+    private func overlapArea(_ lhs: LMNHRect?, _ rhs: CGRect) -> Double {
+        guard let lhs else { return 0 }
+        let l = lhs.cgRect.intersection(rhs)
+        return l.isNull ? 0 : l.width * l.height
+    }
+
+    private func frontmostProcessIdentifier() -> Int32? {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
     }
 
     private func requiresConfirmationResult(

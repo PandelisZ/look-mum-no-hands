@@ -85,6 +85,14 @@ public enum MCPJSONValue: Codable, Equatable, Sendable {
         }
     }
 
+    public var doubleValue: Double? {
+        if case let .number(value) = self {
+            value
+        } else {
+            nil
+        }
+    }
+
     public var intValue: Int? {
         if case let .number(value) = self,
            value.rounded(.towardZero) == value,

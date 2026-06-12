@@ -16,6 +16,8 @@ public protocol LMNHMacOSAutomationServing: Sendable {
     func performAction(arguments: MCPJSONObject) async -> MCPToolResult
     func click(arguments: MCPJSONObject) async -> MCPToolResult
     func typeText(arguments: MCPJSONObject) async -> MCPToolResult
+    func scroll(arguments: MCPJSONObject) async -> MCPToolResult
+    func pressKey(arguments: MCPJSONObject) async -> MCPToolResult
 }
 
 public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sendable {
@@ -97,6 +99,14 @@ public struct PlaceholderMacOSAutomationService: LMNHMacOSAutomationServing, Sen
         )
     }
 
+    public func scroll(arguments: MCPJSONObject) async -> MCPToolResult {
+        placeholderResult(toolName: LMNHMCPTools.scroll, summary: "Scroll service is not wired yet.")
+    }
+
+    public func pressKey(arguments: MCPJSONObject) async -> MCPToolResult {
+        placeholderResult(toolName: LMNHMCPTools.pressKey, summary: "Key press service is not wired yet.")
+    }
+
     private func placeholderResult(toolName: String, summary: String) -> MCPToolResult {
         MCPToolResult.text(
             "\(toolName) is routed, but \(summary)",
@@ -117,6 +127,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
     private let appLauncher: AppLauncher
     private let windowInventory: WindowInventory
     private let snapshotService: SnapshotService
+    private let screenshotService: ScreenshotService
     private let cursorController: VirtualCursorController
     private let actionExecutor: ActionExecutor
 
@@ -137,6 +148,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             windowInventory: windowInventory,
             axClient: axClient
         )
+        self.screenshotService = ScreenshotService()
         _ = VirtualCursorAppearance.load()
         self.cursorController = VirtualCursorController(mode: virtualCursorRenderMode)
         self.actionExecutor = ActionExecutor(elementRegistry: elementRegistry, axClient: axClient)
@@ -208,7 +220,7 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
         snapshot.virtualCursors = cursorController.listCursors()
 
         if arguments["include_screenshot"]?.boolValue == true {
-            snapshot.warnings.append("Screenshot capture is not wired in this MCP transport slice.")
+            snapshot.warnings.append("Inline snapshot screenshots are not supported; call macos_get_screenshot instead.")
         }
 
         if arguments["include_ocr"]?.boolValue == true {
@@ -288,15 +300,80 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
     }
 
     public func getScreenshot(arguments: MCPJSONObject) async -> MCPToolResult {
-        MCPToolResult.text(
-            "Screenshot capture is planned but not wired in this MVP slice. Use macos_snapshot for structured UI state.",
-            structuredContent: .object([
-                "status": .string("not_implemented"),
-                "target": arguments["target"] ?? .string("frontmost_window"),
-                "integration_todo": .string("Wire ScreenCaptureKit SCScreenshotManager/window capture.")
-            ]),
-            isError: true
+        let target = arguments["target"]?.stringValue ?? "frontmost_window"
+        var elementFrame: LMNHRect?
+        var elementPID: Int32?
+
+        if target == "element" {
+            guard let snapshotID = arguments["snapshot_id"]?.stringValue,
+                  let elementID = arguments["element_id"]?.stringValue else {
+                return missingArgumentResult(
+                    toolName: LMNHMCPTools.getScreenshot,
+                    required: ["snapshot_id and element_id when target is element"]
+                )
+            }
+            guard let element = snapshotService.elementRegistry.resolve(snapshotId: snapshotID, elementId: elementID) else {
+                return staleElementResult(snapshotID: snapshotID, elementID: elementID)
+            }
+            elementFrame = element.record.frame
+            elementPID = element.record.processIdentifier
+        }
+
+        let format = ScreenshotImageFormat(rawValue: arguments["format"]?.stringValue ?? "png") ?? .png
+        let request = ScreenshotRequest(
+            target: target,
+            windowID: arguments["window_id"]?.intValue.map(UInt32.init),
+            displayID: arguments["display_id"]?.intValue.map(UInt32.init),
+            elementFrame: elementFrame,
+            elementProcessIdentifier: elementPID,
+            maxWidth: arguments["max_width"]?.intValue ?? 1568,
+            format: format
         )
+
+        do {
+            let capture = try await screenshotService.capture(request)
+            guard let metadata = try? MCPJSONValue.encoded(capture.metadata) else {
+                return MCPToolResult(
+                    content: [.image(data: capture.base64Data, mimeType: format.mimeType)],
+                    isError: false
+                )
+            }
+            return MCPToolResult(
+                content: [
+                    .text("Captured \(target) screenshot (\(capture.metadata.pixelWidth)x\(capture.metadata.pixelHeight)px)."),
+                    .image(data: capture.base64Data, mimeType: format.mimeType)
+                ],
+                structuredContent: .object(["screenshot": metadata]),
+                isError: false
+            )
+        } catch let error as ScreenshotServiceError {
+            var object: MCPJSONObject = [
+                "tool": .string(LMNHMCPTools.getScreenshot),
+                "status": .string("failed"),
+                "reason": .string(error.reason),
+                "target": .string(target)
+            ]
+            if case .permissionDenied = error {
+                object["remediation"] = .string(
+                    "Grant Screen & System Audio Recording permission in System Settings > Privacy & Security, then restart the MCP client."
+                )
+            }
+            return MCPToolResult.text(
+                "Screenshot failed: \(error.reason)",
+                structuredContent: .object(object),
+                isError: true
+            )
+        } catch {
+            return MCPToolResult.text(
+                "Screenshot failed: \(error.localizedDescription)",
+                structuredContent: .object([
+                    "tool": .string(LMNHMCPTools.getScreenshot),
+                    "status": .string("failed"),
+                    "reason": .string(error.localizedDescription)
+                ]),
+                isError: true
+            )
+        }
     }
 
     public func setVirtualCursor(arguments: MCPJSONObject) async -> MCPToolResult {
@@ -461,13 +538,32 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
             return staleElementResult(snapshotID: snapshotID, elementID: elementID)
         }
 
-        let textEntry = actionExecutor.setText(
+        var textEntry = actionExecutor.setText(
             snapshotId: snapshotID,
             elementId: elementID,
             text: text,
             mode: mode,
             confirmationToken: arguments["confirmation_token"]?.stringValue
         )
+
+        if arguments["submit"]?.boolValue == true {
+            textEntry.diagnostics.submitAction = AXNames.Action.confirm
+            if textEntry.action.status != .completed {
+                textEntry.diagnostics.submitStatus = "skipped_text_entry_failed"
+            } else if element.record.actions.contains(AXNames.Action.confirm) {
+                let submitResult = actionExecutor.performAction(
+                    snapshotId: snapshotID,
+                    elementId: elementID,
+                    action: AXNames.Action.confirm,
+                    confirmationToken: arguments["confirmation_token"]?.stringValue
+                )
+                textEntry.diagnostics.submitStatus = submitResult.status.rawValue
+                textEntry.action.warnings.append(contentsOf: submitResult.warnings)
+            } else {
+                textEntry.diagnostics.submitStatus = "unsupported_element_has_no_axconfirm_action"
+            }
+        }
+
         let result = textEntry.action
         let cursor = setCursor(
             for: result,
@@ -482,6 +578,77 @@ public final class DefaultMacOSAutomationService: LMNHMacOSAutomationServing, @u
                 : "Failed focusless AXValue \(mode.rawValue) on \(elementID).",
             result: result,
             diagnostics: textEntry.diagnostics,
+            virtualCursor: cursor
+        )
+    }
+
+    public func scroll(arguments: MCPJSONObject) async -> MCPToolResult {
+        guard let directionRaw = arguments["direction"]?.stringValue,
+              let direction = TargetedEventDispatcher.ScrollDirection(rawValue: directionRaw) else {
+            return MCPToolResult.text(
+                "macos_scroll requires direction up, down, left, or right.",
+                structuredContent: .object([
+                    "tool": .string(LMNHMCPTools.scroll),
+                    "status": .string("invalid_arguments"),
+                    "valid_directions": .array(["up", "down", "left", "right"].map { .string($0) })
+                ]),
+                isError: true
+            )
+        }
+
+        let snapshotID = arguments["snapshot_id"]?.stringValue
+        let elementID = arguments["element_id"]?.stringValue
+        if elementID != nil && snapshotID == nil {
+            return missingArgumentResult(toolName: LMNHMCPTools.scroll, required: ["snapshot_id when element_id is supplied"])
+        }
+
+        let element = snapshotID.flatMap { snapshotID in
+            elementID.flatMap { snapshotService.elementRegistry.resolve(snapshotId: snapshotID, elementId: $0) }
+        }
+
+        let result = actionExecutor.scroll(
+            snapshotId: snapshotID,
+            elementId: elementID,
+            point: makePoint(arguments: arguments),
+            direction: direction,
+            pages: arguments["pages"]?.doubleValue ?? 1,
+            targetProcessIdentifier: arguments["target_pid"]?.intValue.map(Int32.init)
+        )
+        let cursor = setCursor(for: result, element: element?.record, state: result.status == .completed ? .scrolling : .blocked)
+
+        return actionToolResult(
+            summary: result.status == .completed
+                ? "Scrolled \(direction.rawValue) without moving the real mouse."
+                : "Scroll \(direction.rawValue) failed before moving the real mouse.",
+            result: result,
+            virtualCursor: cursor
+        )
+    }
+
+    public func pressKey(arguments: MCPJSONObject) async -> MCPToolResult {
+        guard let key = arguments["key"]?.stringValue, !key.isEmpty else {
+            return missingArgumentResult(toolName: LMNHMCPTools.pressKey, required: ["key"])
+        }
+
+        let snapshotID = arguments["snapshot_id"]?.stringValue
+        let elementID = arguments["element_id"]?.stringValue
+        let element = snapshotID.flatMap { snapshotID in
+            elementID.flatMap { snapshotService.elementRegistry.resolve(snapshotId: snapshotID, elementId: $0) }
+        }
+
+        let result = actionExecutor.pressKey(
+            snapshotId: snapshotID,
+            elementId: elementID,
+            keyCombination: key,
+            targetProcessIdentifier: arguments["target_pid"]?.intValue.map(Int32.init)
+        )
+        let cursor = setCursor(for: result, element: element?.record, state: result.status == .completed ? .typing : .blocked)
+
+        return actionToolResult(
+            summary: result.status == .completed
+                ? "Pressed \(key) without moving the real mouse."
+                : "Failed to press \(key).",
+            result: result,
             virtualCursor: cursor
         )
     }
@@ -732,6 +899,10 @@ public actor MCPToolRouter {
             await service.click(arguments: arguments)
         case LMNHMCPTools.typeText:
             await service.typeText(arguments: arguments)
+        case LMNHMCPTools.scroll:
+            await service.scroll(arguments: arguments)
+        case LMNHMCPTools.pressKey:
+            await service.pressKey(arguments: arguments)
         default:
             MCPToolResult.text(
                 "Unknown tool: \(name)",

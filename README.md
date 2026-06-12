@@ -264,12 +264,12 @@ LMNH currently exposes these tools:
 - `macos_snapshot`
 - `macos_get_element`
 - `macos_find_elements`
-- `macos_get_screenshot`
+- `macos_get_screenshot` — ScreenCaptureKit capture of the frontmost window, a specific window, a display, or a snapshot element region; supports `max_width` downscaling and `png`/`jpeg` output
 - `macos_set_virtual_cursor`
 - `macos_hide_virtual_cursor`
 - `macos_perform_action`
 - `macos_click`
-- `macos_type_text`
+- `macos_type_text` — focusless AXValue text mutation with optional `submit: true` to fire the element's `AXConfirm` action afterwards
 
 Typical agent flow:
 
@@ -350,8 +350,11 @@ Run MCP smoke tests after building:
 
 ```bash
 python3 scripts/mcp_smoke.py
+python3 scripts/screenshot_smoke.py
 python3 scripts/http_mcp_smoke.py
 ```
+
+The screenshot smoke test needs Screen Recording permission and saves sample captures under `/tmp/lmnh-screenshot-smoke/`.
 
 ## Troubleshooting
 

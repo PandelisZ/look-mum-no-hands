@@ -124,6 +124,20 @@ public final class SnapshotService {
 
         if let targetApplication {
             let root = axClient.applicationElement(processIdentifier: targetApplication.processIdentifier)
+
+            if permissionStatus.accessibilityTrusted {
+                let newlyActivated = EnhancedAccessibilityActivator.shared.activateIfNeeded(
+                    processIdentifier: targetApplication.processIdentifier,
+                    applicationElement: root
+                )
+                if newlyActivated {
+                    // Chromium/Electron apps populate their AX tree asynchronously after the
+                    // enhanced-accessibility attributes are set; give it a brief moment.
+                    Thread.sleep(forTimeInterval: 0.35)
+                    warnings.append("Enabled enhanced accessibility for \(targetApplication.localizedName ?? "target app"); re-run macos_snapshot if the tree looks incomplete.")
+                }
+            }
+
             let result = treeBuilder.buildApplicationTree(
                 root: root,
                 snapshotId: snapshotId,

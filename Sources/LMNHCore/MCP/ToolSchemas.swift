@@ -14,6 +14,8 @@ public enum LMNHMCPTools {
     public static let performAction = "macos_perform_action"
     public static let click = "macos_click"
     public static let typeText = "macos_type_text"
+    public static let scroll = "macos_scroll"
+    public static let pressKey = "macos_press_key"
 
     public static let allDefinitions: [MCPToolDefinition] = [
         MCPToolDefinition(
@@ -131,11 +133,32 @@ public enum LMNHMCPTools {
         ),
         MCPToolDefinition(
             name: getScreenshot,
-            description: "Return screenshot metadata or image content for a target. Image capture is planned but not wired in the current slice.",
+            description: "Capture a pixel screenshot of the frontmost window, a specific window, a display, or a snapshot element region. Uses ScreenCaptureKit; never moves the real mouse or changes focus.",
             inputSchema: objectSchema(properties: [
-                "target": stringEnum(["frontmost_window", "display", "element"], defaultValue: "frontmost_window"),
-                "snapshot_id": .object(["type": .string("string")]),
-                "element_id": .object(["type": .string("string")])
+                "target": stringEnum(["frontmost_window", "window", "display", "element"], defaultValue: "frontmost_window"),
+                "snapshot_id": .object([
+                    "type": .string("string"),
+                    "description": .string("Snapshot id, required when target is element.")
+                ]),
+                "element_id": .object([
+                    "type": .string("string"),
+                    "description": .string("Element id, required when target is element.")
+                ]),
+                "window_id": .object([
+                    "type": .string("integer"),
+                    "description": .string("CGWindow id from macos_list_windows, required when target is window.")
+                ]),
+                "display_id": .object([
+                    "type": .string("integer"),
+                    "description": .string("Display id; defaults to the main display when target is display.")
+                ]),
+                "max_width": .object([
+                    "type": .string("integer"),
+                    "default": .integer(1568),
+                    "minimum": .integer(64),
+                    "description": .string("Downscale wider captures to this pixel width to keep payloads small.")
+                ]),
+                "format": stringEnum(["png", "jpeg"], defaultValue: "png")
             ]),
             annotations: .object(["readOnlyHint": .bool(true)])
         ),
@@ -234,12 +257,72 @@ public enum LMNHMCPTools {
                     "mode": stringEnum(["replace", "append", "selection"], defaultValue: "replace"),
                     "submit": .object([
                         "type": .string("boolean"),
-                        "default": .bool(false)
+                        "default": .bool(false),
+                        "description": .string("After a successful text mutation, perform the element's AXConfirm action (focusless submit). Reported as unsupported when the element exposes no AXConfirm.")
                     ]),
                     "session_id": .object(["type": .string("string")]),
                     "confirmation_token": .object(["type": .string("string")])
                 ],
                 required: ["snapshot_id", "element_id", "text"]
+            ),
+            annotations: .object([
+                "readOnlyHint": .bool(false),
+                "destructiveHint": .bool(false),
+                "openWorldHint": .bool(true)
+            ])
+        ),
+        MCPToolDefinition(
+            name: scroll,
+            description: "Scroll a window or element without moving the real mouse or changing focus. Delivers a scroll wheel event directly to the target process with CGEvent.postToPid.",
+            inputSchema: objectSchema(
+                properties: [
+                    "snapshot_id": .object(["type": .string("string")]),
+                    "element_id": .object([
+                        "type": .string("string"),
+                        "description": .string("Element to scroll over; its frame center is used as the scroll point.")
+                    ]),
+                    "direction": stringEnum(["up", "down", "left", "right"], defaultValue: "down"),
+                    "pages": .object([
+                        "type": .string("number"),
+                        "default": .number(1),
+                        "minimum": .number(0.05),
+                        "description": .string("Scroll magnitude in pages; ~8 wheel ticks per page.")
+                    ]),
+                    "x": .object(["type": .string("number")]),
+                    "y": .object(["type": .string("number")]),
+                    "target_pid": .object([
+                        "type": .string("integer"),
+                        "description": .string("Target process id when scrolling by x,y without an element.")
+                    ])
+                ],
+                required: ["direction"]
+            ),
+            annotations: .object([
+                "readOnlyHint": .bool(false),
+                "destructiveHint": .bool(false),
+                "openWorldHint": .bool(true)
+            ])
+        ),
+        MCPToolDefinition(
+            name: pressKey,
+            description: "Press a key or key combination (e.g. \"return\", \"escape\", \"cmd+s\", \"shift+tab\") delivered to a target window without moving the real mouse or stealing focus. The keystroke goes to the target app's focused element.",
+            inputSchema: objectSchema(
+                properties: [
+                    "key": .object([
+                        "type": .string("string"),
+                        "description": .string("Key combination using + as a separator. Modifiers: cmd/command, ctrl/control, option/alt, shift, fn. Named keys: return, enter, escape, tab, space, delete, arrows, home, end, pageup, pagedown, f1-f12.")
+                    ]),
+                    "snapshot_id": .object(["type": .string("string")]),
+                    "element_id": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional element used to resolve the target window; the key still routes to the app's focused element.")
+                    ]),
+                    "target_pid": .object([
+                        "type": .string("integer"),
+                        "description": .string("Optional target process id; defaults to the frontmost application.")
+                    ])
+                ],
+                required: ["key"]
             ),
             annotations: .object([
                 "readOnlyHint": .bool(false),

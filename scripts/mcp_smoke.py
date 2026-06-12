@@ -23,6 +23,8 @@ EXPECTED_TOOLS = {
     "macos_perform_action",
     "macos_click",
     "macos_type_text",
+    "macos_scroll",
+    "macos_press_key",
 }
 
 
@@ -164,6 +166,33 @@ def main():
                 },
             },
         },
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "macos_scroll",
+                "arguments": {"direction": "down", "pages": 0.1, "x": 200, "y": 200},
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "macos_scroll",
+                "arguments": {"direction": "sideways"},
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "macos_press_key",
+                "arguments": {"key": "totally-not-a-key"},
+            },
+        },
     ]
 
     env = dict(**os.environ, LMNH_OVERLAY_RENDERER="headless")
@@ -243,6 +272,23 @@ def main():
     for key in ("bundle_id", "app_path", "background", "restore_focus"):
         if key not in open_schema:
             raise AssertionError(f"macos_open_app schema missing {key}")
+
+    scroll_result = response_by_id(messages, 10)["result"]["structuredContent"]["action"]
+    if scroll_result["real_mouse_moved"]:
+        raise AssertionError("Focusless scroll moved the real mouse")
+    if scroll_result["layer"] != "targeted_quartz_event":
+        raise AssertionError(f"Unexpected scroll layer: {scroll_result['layer']}")
+
+    bad_scroll = response_by_id(messages, 11)["result"]
+    if not bad_scroll["isError"]:
+        raise AssertionError("Invalid scroll direction should error")
+
+    bad_key = response_by_id(messages, 12)["result"]
+    if not bad_key["isError"]:
+        raise AssertionError("Unsupported key combination should error")
+    bad_key_action = bad_key["structuredContent"]["action"]
+    if bad_key_action["real_mouse_moved"]:
+        raise AssertionError("Failed key press moved the real mouse")
 
     print("MCP smoke passed")
     print(f"tools={len(tool_names)} snapshot_chars={len(snapshot_text)}")

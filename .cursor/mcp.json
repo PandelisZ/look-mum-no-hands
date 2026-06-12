@@ -1,12 +1,15 @@
 {
-  "mcpServers" : {
-    "look-mum-no-hands-dev" : {
-      "args" : [
-
+  "mcpServers": {
+    "look-mum-no-hands": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/plugins/look-mum-no-hands/scripts/run-lmnh-mcp.sh"
       ],
-      "command" : "\/Users\/pz\/w\/look-mum-no-hands\/.build\/debug\/lmnh-mcp",
-      "env" : {
-        "LMNH_LOG_LEVEL" : "debug"
+      "env": {
+        "LMNH_REPO_ROOT": "${workspaceFolder}",
+        "LMNH_LOG_LEVEL": "debug",
+        "LMNH_OVERLAY_RENDERER": "headless"
       }
     }
   }

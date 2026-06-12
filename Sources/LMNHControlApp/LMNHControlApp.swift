@@ -163,13 +163,20 @@ final class ControlPanelModel: ObservableObject {
         do {
             let cursorDirectory = LMNHPaths.projectRoot.appending(path: ".cursor", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: cursorDirectory, withIntermediateDirectories: true)
+            let repoRoot = LMNHPaths.projectRoot.path
+            let launchScript = LMNHPaths.projectRoot
+                .appending(path: "plugins/look-mum-no-hands/scripts/run-lmnh-mcp.sh")
+                .path
             let config: [String: Any] = [
                 "mcpServers": [
-                    "look-mum-no-hands-dev": [
-                        "command": Self.mcpBinaryURL.path,
-                        "args": [],
+                    "look-mum-no-hands": [
+                        "type": "stdio",
+                        "command": "bash",
+                        "args": [launchScript],
                         "env": [
-                            "LMNH_LOG_LEVEL": "debug"
+                            "LMNH_REPO_ROOT": repoRoot,
+                            "LMNH_LOG_LEVEL": "debug",
+                            "LMNH_OVERLAY_RENDERER": "headless"
                         ]
                     ]
                 ]

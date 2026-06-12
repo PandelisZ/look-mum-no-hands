@@ -47,6 +47,8 @@ public struct TextEntryDiagnostics: Codable, Sendable {
     public var failureReason: String?
     public var role: String?
     public var settableAttributes: [String]
+    public var submitAction: String?
+    public var submitStatus: String?
 
     public init(
         method: String,
@@ -62,7 +64,9 @@ public struct TextEntryDiagnostics: Codable, Sendable {
         fallbackPolicy: String = "keyboard_and_paste_not_attempted",
         failureReason: String? = nil,
         role: String? = nil,
-        settableAttributes: [String] = []
+        settableAttributes: [String] = [],
+        submitAction: String? = nil,
+        submitStatus: String? = nil
     ) {
         self.method = method
         self.requestedMode = requestedMode
@@ -78,6 +82,8 @@ public struct TextEntryDiagnostics: Codable, Sendable {
         self.failureReason = failureReason
         self.role = role
         self.settableAttributes = settableAttributes
+        self.submitAction = submitAction
+        self.submitStatus = submitStatus
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -95,6 +101,8 @@ public struct TextEntryDiagnostics: Codable, Sendable {
         case failureReason = "failure_reason"
         case role
         case settableAttributes = "settable_attributes"
+        case submitAction = "submit_action"
+        case submitStatus = "submit_status"
     }
 }
 
@@ -187,6 +195,7 @@ public struct CompactTextEntryResult: Codable, Sendable {
     public var resultingLength: Int?
     public var fallbackPolicy: String
     public var failureReason: String?
+    public var submit: String?
 
     private enum CodingKeys: String, CodingKey {
         case action
@@ -197,6 +206,7 @@ public struct CompactTextEntryResult: Codable, Sendable {
         case resultingLength = "resulting_length"
         case fallbackPolicy = "fallback_policy"
         case failureReason = "failure_reason"
+        case submit
     }
 
     public init(action: MacOSActionResult, diagnostics: TextEntryDiagnostics, cursor: VirtualCursorRecord?) {
@@ -208,6 +218,9 @@ public struct CompactTextEntryResult: Codable, Sendable {
         self.resultingLength = diagnostics.resultingLength
         self.fallbackPolicy = diagnostics.fallbackPolicy
         self.failureReason = diagnostics.failureReason
+        self.submit = diagnostics.submitStatus.map { status in
+            diagnostics.submitAction.map { "\($0)=\(status)" } ?? status
+        }
     }
 }
 
