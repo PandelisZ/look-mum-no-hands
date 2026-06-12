@@ -8,8 +8,7 @@
       ],
       "env": {
         "LMNH_REPO_ROOT": "${workspaceFolder}",
-        "LMNH_LOG_LEVEL": "debug",
-        "LMNH_OVERLAY_RENDERER": "headless"
+        "LMNH_LOG_LEVEL": "debug"
       }
     }
   }
